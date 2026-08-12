@@ -1,10 +1,14 @@
-"""Anonymous, read-only access to ethos-manual-rework's structure: branches,
-locales, and the docs nav (the page picker's table of contents).
+"""Read-only access to ethos-manual-rework's structure: branches, locales,
+and the docs nav (the page picker's table of contents).
 
-Deliberately unauthenticated -- see auth.py's docstring and app.py's plan
-for why. This is all public-repo reads, so there's nothing to sign in for;
-using an authenticated client here would just spend the user's own PAT's
-rate limit for no reason before they've even decided what to edit.
+Unauthenticated by default -- see auth.py's docstring and app.py's plan for
+why browsing doesn't require signing in, this repo is public. But once a
+token *does* exist (the user signed in, for this session or a past one --
+see set_token(), called from app.py on sign-in/out), there's no reason not
+to use it for browsing too: it costs nothing (same token they'd need for
+the save step anyway) and raises the rate limit from 60/hour to 5000/hour,
+which matters in practice -- anonymous is easy to exhaust just from normal
+use, let alone testing (hit this for real, see _wrap_errors).
 
 build_toc() walks mkdocs.yml's `nav:` the same way ethos-manual-rework's
 own scripts/build_pdfs.py:nav_pages() does, fed a copy of mkdocs.yml
@@ -19,7 +23,7 @@ import base64
 from dataclasses import dataclass, field
 
 import yaml
-from github import Github
+from github import Auth, Github
 from github.GithubException import (
     GithubException,
     RateLimitExceededException,
@@ -28,6 +32,7 @@ from github.GithubException import (
 
 REPO_SLUG = "robthomson/ethos-manual-rework"
 
+
 # retry=None: PyGithub's default retries a rate-limited request by *waiting
 # out* the rate-limit window (which can be several minutes) before raising
 # anything -- great for a script, bad for a GUI that would otherwise just
@@ -35,7 +40,21 @@ REPO_SLUG = "robthomson/ethos-manual-rework"
 # retries makes a 403 surface immediately as RateLimitExceededException,
 # which _wrap_errors turns into a message actually explaining what
 # happened.
-_gh = Github(retry=None)  # anonymous: no token, ~60 requests/hour
+def _client(token: str | None) -> Github:
+    return Github(auth=Auth.Token(token), retry=None) if token else Github(retry=None)
+
+
+_gh = _client(None)  # anonymous until set_token() says otherwise
+_authenticated = False
+
+
+def set_token(token: str | None) -> None:
+    """Switches the client used for all reads. Call with a token on sign-in
+    (including the silent auto-sign-in from a stored one), with None on
+    sign-out."""
+    global _gh, _authenticated
+    _gh = _client(token)
+    _authenticated = token is not None
 
 
 class RepoError(Exception):
@@ -55,11 +74,11 @@ def _wrap_errors(action: str, fn):
     except RepoError:
         raise  # already has a clean, specific message -- don't rewrap it
     except RateLimitExceededException as e:
-        raise RepoError(
-            f"GitHub's rate limit for anonymous browsing (60 requests/hour) was hit "
-            f"while {action}. Wait a few minutes and try again, or sign in (raises "
-            f"the limit to 5000/hour)."
-        ) from e
+        if _authenticated:
+            hint = "Even signed in, that's a lot of requests -- wait a few minutes and try again."
+        else:
+            hint = "Wait a few minutes and try again, or sign in (raises the limit from 60 to 5000/hour)."
+        raise RepoError(f"GitHub's rate limit was hit while {action}. {hint}") from e
     except GithubException as e:
         raise RepoError(f"GitHub error while {action}: {e.data}") from e
     except Exception as e:

@@ -26,7 +26,20 @@ _KEYRING_USERNAME = "github-pat"
 
 
 class AuthError(Exception):
-    """Raised for any sign-in failure, with a message safe to show as-is."""
+    """Raised for any sign-in failure, with a message safe to show as-is.
+
+    invalid_credential distinguishes "this token is actually bad" (GitHub
+    rejected it outright -- safe, correct to forget it and stop trying)
+    from every other failure (rate-limited, network blip, GitHub having a
+    moment -- the token itself might be perfectly fine, so callers doing an
+    unattended auto-sign-in shouldn't clear a stored token over one of
+    these). Defaults to False so a caller that doesn't check it fails safe
+    (keeps the token) rather than unsafe (discards a possibly-good one).
+    """
+
+    def __init__(self, message: str, *, invalid_credential: bool = False):
+        super().__init__(message)
+        self.invalid_credential = invalid_credential
 
 
 @dataclass
@@ -49,13 +62,19 @@ def validate_token(token: str) -> SignedInUser:
     if not token:
         raise AuthError("Enter a GitHub personal access token.")
 
-    gh = Github(auth=Auth.Token(token))
+    # retry=None: see github_repo.py's identical comment -- PyGithub's
+    # default retry waits out a rate-limit window (minutes) before raising
+    # anything, which for a GUI means silently hanging on "Signing in..."
+    # for however long that takes.
+    gh = Github(auth=Auth.Token(token), retry=None)
     try:
         user = gh.get_user()
         login = user.login  # forces the API call; PyGithub is lazy
         name = user.name
     except BadCredentialsException as e:
-        raise AuthError("That token isn't valid (GitHub rejected it).") from e
+        raise AuthError(
+            "That token isn't valid (GitHub rejected it).", invalid_credential=True
+        ) from e
     except GithubException as e:
         raise AuthError(f"GitHub error while checking the token: {e.data}") from e
     except Exception as e:  # network errors, etc.
@@ -64,13 +83,16 @@ def validate_token(token: str) -> SignedInUser:
     try:
         gh.get_repo(REPO_SLUG)
     except BadCredentialsException as e:
-        raise AuthError("That token isn't valid (GitHub rejected it).") from e
+        raise AuthError(
+            "That token isn't valid (GitHub rejected it).", invalid_credential=True
+        ) from e
     except GithubException as e:
         if e.status in (404, 403):
             raise AuthError(
                 f"Signed in as {login}, but this token can't see {REPO_SLUG}. "
                 "Check it's a fine-grained PAT scoped to that repo, with "
-                "Contents and Pull requests permissions."
+                "Contents and Pull requests permissions.",
+                invalid_credential=True,
             ) from e
         raise AuthError(f"GitHub error while checking repo access: {e.data}") from e
 

@@ -244,8 +244,17 @@ class App(tk.Tk):
     def _build_status_bar(self):
         status = ttk.Frame(self, relief="sunken")
         status.pack(side="bottom", fill="x")
-        self.status_label = ttk.Label(status, text="Browsing anonymously", padding=(8, 2))
+        self.status_label = ttk.Label(status, text=self._default_status_text(), padding=(8, 2))
         self.status_label.pack(side="left")
+
+    def _default_status_text(self) -> str:
+        # Signed in bumps github_repo's rate limit from 60 to 5000/hour
+        # (see github_repo.set_token()) -- worth surfacing here so it's
+        # visible that signing in early, even though nothing requires it
+        # until the save step, has an upside.
+        if self.user:
+            return f"Signed in as {self.user.login} (5,000 requests/hour)"
+        return "Browsing anonymously (60 requests/hour)"
 
     def _show_about(self):
         messagebox.showinfo(
@@ -308,7 +317,8 @@ class App(tk.Tk):
     def _handle_signin_success(self, user: auth.SignedInUser):
         auth.save_token(user.token)
         self.user = user
-        self.status_label.config(text=f"Signed in as {user.login}")
+        github_repo.set_token(user.token)
+        self.status_label.config(text=self._default_status_text())
         self.file_menu.entryconfig("Sign out", state="normal")
 
         self.token_entry.pack_forget()
@@ -320,16 +330,21 @@ class App(tk.Tk):
 
     def _handle_signin_error(self, error: Exception):
         self._set_signin_busy(False)
-        self.status_label.config(text="Browsing anonymously")
+        self.status_label.config(text=self._default_status_text())
         messagebox.showerror("Sign in failed", str(error))
 
-    def _handle_auto_signin_error(self, error: Exception):
-        # A silently-attempted auto sign-in failed (e.g. token revoked
-        # since last run) -- clear it rather than retrying every launch,
-        # but don't interrupt startup with a dialog for it.
+    def _handle_auto_signin_error(self, error: auth.AuthError):
+        # A silently-attempted auto sign-in failed -- don't interrupt
+        # startup with a dialog for it either way, but only actually clear
+        # the stored token if it's the token itself that's the problem
+        # (revoked/wrong scope). A rate limit or network blip doesn't mean
+        # the token is bad -- clearing it over one of those would force a
+        # perfectly good token to be re-pasted just because GitHub or the
+        # network had a moment.
         self._set_signin_busy(False)
-        self.status_label.config(text="Browsing anonymously")
-        auth.clear_token()
+        self.status_label.config(text=self._default_status_text())
+        if error.invalid_credential:
+            auth.clear_token()
 
     def _set_signin_busy(self, busy: bool):
         state = "disabled" if busy else "normal"
@@ -339,8 +354,9 @@ class App(tk.Tk):
     def _on_sign_out(self):
         auth.clear_token()
         self.user = None
+        github_repo.set_token(None)
         self.file_menu.entryconfig("Sign out", state="disabled")
-        self.status_label.config(text="Browsing anonymously")
+        self.status_label.config(text=self._default_status_text())
 
         self.signed_in_label.pack_forget()
         self.token_entry.delete(0, tk.END)
@@ -363,7 +379,7 @@ class App(tk.Tk):
         if branches:
             self.branch_combo.current(0)
             self._load_branch_content(branches[0])
-        self.status_label.config(text="Browsing anonymously")
+        self.status_label.config(text=self._default_status_text())
 
     def _on_branch_selected(self, _event):
         self._clear_editor()
@@ -395,7 +411,7 @@ class App(tk.Tk):
         for page in github_repo.build_toc(config):
             self._insert_toc_page("", page)
 
-        self.status_label.config(text="Browsing anonymously")
+        self.status_label.config(text=self._default_status_text())
 
     def _insert_toc_page(self, parent_iid: str, page: github_repo.TocPage):
         iid = self.toc_tree.insert(parent_iid, "end", text=page.title, open=False)
@@ -496,7 +512,7 @@ class App(tk.Tk):
         preview.open_preview(html)
 
     def _handle_browse_error(self, error: Exception):
-        self.status_label.config(text="Browsing anonymously")
+        self.status_label.config(text=self._default_status_text())
         messagebox.showerror("Couldn't load from GitHub", str(error))
 
 
