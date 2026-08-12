@@ -7,10 +7,10 @@ A GUI tool for translators to edit ethos-manual-rework's per-locale docs
 pages and submit the result back as a GitHub pull request, without needing
 a local git checkout or a markdown editor of their own.
 
-Status: sign-in (auth.py) and browsing -- branch picker, locale picker, and
-a table-of-contents tree walked from mkdocs.yml's `nav:` (github_repo.py) --
-are wired up and working end to end against the real, live, public repo.
-Editing and PR submission are not yet.
+Status: sign-in (auth.py), browsing (github_repo.py), and the editor itself
+(English read-only + target-locale editable panes, "Preview" rendering via
+preview.py) are wired up and working end to end against the real, live,
+public repo. PR submission is not yet.
 
 Planned flow:
   1. Login       -- DONE (auth.py). GitHub fine-grained PAT, pasted in once
@@ -20,19 +20,27 @@ Planned flow:
                      browsing is anonymous (see github_repo.py).
   2. Branch/page  -- DONE (github_repo.py). Branches and the nav-derived
                      TOC, both read anonymously (public repo).
-  3. Editor       -- English (read-only) + target locale (editable) source
-                     panes side by side, "Preview" opens the real rendered
-                     HTML in the system browser (render server-side-style
-                     via `markdown` + the same pymdownx extensions
-                     ethos-manual-rework's mkdocs.yml lists, for accurate
-                     preview -- not a generic JS-equivalent renderer).
+  3. Editor       -- DONE (github_repo.py + preview.py). English
+                     (read-only) + target locale (editable) source panes
+                     side by side -- a missing translation is pre-filled
+                     with the English source as a starting point, not left
+                     blank. "Preview" renders the *edited* locale text
+                     through the same pymdownx extensions
+                     ethos-manual-rework's mkdocs.yml lists and opens it in
+                     the system browser, with image src=""s rewritten to
+                     raw.githubusercontent.com so screenshots actually
+                     load. Known gap: swapping in a *replacement* image
+                     (this repo's screenshots are per-locale, not shared)
+                     isn't handled -- that's a save-step concern, see below.
   4. Save         -- create/update a translate/<locale>/<slug> branch,
                      commit via the Contents API using the translator's own
                      token, bump `translated_from:` frontmatter to the
                      English page's current commit SHA (same convention as
                      ethos-manual-rework's hooks/i18n_status.py checks),
                      open a PR. ethos-manual-rework's pr-preview.yml then
-                     comments a live preview link automatically.
+                     comments a live preview link automatically. Needs to
+                     also cover replacing a page's screenshots, not just
+                     its markdown text -- not designed yet.
 
 Locale assignment (translators.yml -> github username -> locale) is a soft,
 advisory check here -- there's no server to be a hard gate once this is a
@@ -55,6 +63,7 @@ except ImportError:
 
 import auth
 import github_repo
+import preview
 
 APP_TITLE = "Ethos Manual Translator"
 
@@ -70,13 +79,20 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(APP_TITLE)
-        self.geometry("900x600")
-        self.minsize(700, 450)
+        self.geometry("1200x720")
+        self.minsize(900, 500)
         self._set_icon()
 
         self.user: auth.SignedInUser | None = None
         self._toc_paths: dict[str, str | None] = {}  # tree item id -> md_path
         self._bg_queue: queue.Queue = queue.Queue()
+
+        # Set once a branch's mkdocs.yml has loaded; used by the editor to
+        # know what it's fetching/rendering for.
+        self._branch_config: dict | None = None
+        self._current_branch: str | None = None
+        self._current_md_path: str | None = None
+        self._english_source: str | None = None
 
         self._build_menu()
         self._build_body()
@@ -114,29 +130,39 @@ class App(tk.Tk):
         self.config(menu=menubar)
 
     def _build_body(self):
-        container = ttk.Frame(self, padding=24)
-        container.pack(fill="both", expand=True)
+        outer = ttk.Frame(self, padding=(24, 24, 24, 12))
+        outer.pack(fill="both", expand=True)
 
         ttk.Label(
-            container,
+            outer,
             text=APP_TITLE,
             font=("TkDefaultFont", 16, "bold"),
         ).pack(anchor="w")
 
         ttk.Label(
-            container,
-            text="Editing and PR submission are not wired up yet.",
+            outer,
+            text="PR submission is not wired up yet -- edits here aren't saved anywhere.",
             justify="left",
-        ).pack(anchor="w", pady=(4, 16))
+        ).pack(anchor="w", pady=(4, 12))
 
-        self._build_login_frame(container)
-        self._build_browse_frame(container)
+        self._build_login_frame(outer)
+
+        main_paned = ttk.PanedWindow(outer, orient="horizontal")
+        main_paned.pack(fill="both", expand=True, pady=(12, 0))
+
+        left = ttk.Frame(main_paned)
+        main_paned.add(left, weight=1)
+        self._build_browse_pane(left)
+
+        right = ttk.Frame(main_paned)
+        main_paned.add(right, weight=3)
+        self._build_editor_pane(right)
 
     def _build_login_frame(self, parent):
         self.login_frame = ttk.LabelFrame(
             parent, text="Sign in (only needed to submit for review)", padding=12
         )
-        self.login_frame.pack(fill="x", pady=(0, 12))
+        self.login_frame.pack(fill="x")
 
         ttk.Label(self.login_frame, text="GitHub personal access token:").pack(
             side="left"
@@ -152,28 +178,68 @@ class App(tk.Tk):
 
         self.signed_in_label = ttk.Label(self.login_frame, text="")
 
-    def _build_browse_frame(self, parent):
-        browse_frame = ttk.LabelFrame(parent, text="Browse", padding=12)
-        browse_frame.pack(fill="both", expand=True)
-
-        picker_row = ttk.Frame(browse_frame)
+    def _build_browse_pane(self, parent):
+        picker_row = ttk.Frame(parent)
         picker_row.pack(fill="x", pady=(0, 8))
 
-        ttk.Label(picker_row, text="Branch:").pack(side="left")
-        self.branch_combo = ttk.Combobox(picker_row, state="disabled", width=20)
-        self.branch_combo.pack(side="left", padx=(4, 16))
+        ttk.Label(picker_row, text="Branch:").grid(row=0, column=0, sticky="w")
+        self.branch_combo = ttk.Combobox(picker_row, state="disabled")
+        self.branch_combo.grid(row=0, column=1, sticky="ew", padx=(4, 0), pady=(0, 4))
         self.branch_combo.bind("<<ComboboxSelected>>", self._on_branch_selected)
 
-        ttk.Label(picker_row, text="Language:").pack(side="left")
-        self.locale_combo = ttk.Combobox(picker_row, state="disabled", width=20)
-        self.locale_combo.pack(side="left", padx=(4, 0))
+        ttk.Label(picker_row, text="Language:").grid(row=1, column=0, sticky="w")
+        self.locale_combo = ttk.Combobox(picker_row, state="disabled")
+        self.locale_combo.grid(row=1, column=1, sticky="ew", padx=(4, 0))
+        self.locale_combo.bind("<<ComboboxSelected>>", self._on_locale_selected)
 
-        self.toc_tree = ttk.Treeview(browse_frame, show="tree")
+        picker_row.columnconfigure(1, weight=1)
+
+        self.toc_tree = ttk.Treeview(parent, show="tree")
         self.toc_tree.pack(fill="both", expand=True)
         self.toc_tree.bind("<<TreeviewSelect>>", self._on_toc_select)
 
-        self.selection_label = ttk.Label(browse_frame, text="No page selected.")
-        self.selection_label.pack(anchor="w", pady=(8, 0))
+    def _build_editor_pane(self, parent):
+        header_row = ttk.Frame(parent)
+        header_row.pack(fill="x", pady=(0, 8))
+
+        self.selection_label = ttk.Label(header_row, text="Select a page to edit.")
+        self.selection_label.pack(side="left")
+
+        self.preview_button = ttk.Button(
+            header_row, text="Preview in browser", command=self._on_preview, state="disabled"
+        )
+        self.preview_button.pack(side="right")
+
+        panes = ttk.Frame(parent)
+        panes.pack(fill="both", expand=True)
+        panes.columnconfigure(0, weight=1)
+        panes.columnconfigure(1, weight=1)
+        panes.rowconfigure(1, weight=1)
+
+        ttk.Label(panes, text="English (read-only)").grid(row=0, column=0, sticky="w")
+        ttk.Label(panes, text="Translation (editable)").grid(row=0, column=1, sticky="w", padx=(8, 0))
+
+        self.english_text = self._make_text_pane(panes, row=1, column=0)
+        self.english_text.config(state="disabled")
+
+        self.locale_text = self._make_text_pane(panes, row=1, column=1, padx=(8, 0))
+
+    def _make_text_pane(self, parent, row: int, column: int, padx=0) -> tk.Text:
+        # The Text + Scrollbar pair share a wrapper frame (packed together
+        # inside it); the frame itself, not the Text widget, is what's
+        # actually grid-managed within `parent` -- gridding the Text widget
+        # directly would try to place it within its real parent (the
+        # wrapper), which already manages it via pack(), and Tk doesn't
+        # allow mixing geometry managers on the same container's children.
+        frame = ttk.Frame(parent)
+        frame.grid(row=row, column=column, sticky="nsew", padx=padx)
+
+        text = tk.Text(frame, wrap="word", font=("TkFixedFont",), undo=True)
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=text.yview)
+        text.config(yscrollcommand=scrollbar.set)
+        text.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        return text
 
     def _build_status_bar(self):
         status = ttk.Frame(self, relief="sunken")
@@ -300,9 +366,11 @@ class App(tk.Tk):
         self.status_label.config(text="Browsing anonymously")
 
     def _on_branch_selected(self, _event):
+        self._clear_editor()
         self._load_branch_content(self.branch_combo.get())
 
     def _load_branch_content(self, branch: str):
+        self._current_branch = branch
         self.status_label.config(text=f"Loading {branch}...")
         self.locale_combo.config(state="disabled")
         self._run_background(
@@ -312,6 +380,7 @@ class App(tk.Tk):
         )
 
     def _handle_branch_content_loaded(self, config: dict):
+        self._branch_config = config
         locales = github_repo.locale_names(config)
         # English first (it's the source of truth every translation is
         # compared against), then the rest alphabetically by locale code.
@@ -334,6 +403,10 @@ class App(tk.Tk):
         for child in page.children:
             self._insert_toc_page(iid, child)
 
+    def _selected_locale_code(self) -> str | None:
+        value = self.locale_combo.get()
+        return value.split(" - ", 1)[0] if value else None
+
     def _on_toc_select(self, _event):
         selected = self.toc_tree.selection()
         if not selected:
@@ -341,10 +414,86 @@ class App(tk.Tk):
         iid = selected[0]
         md_path = self._toc_paths.get(iid)
         title = self.toc_tree.item(iid, "text")
-        if md_path:
-            self.selection_label.config(text=f"Selected: {title} ({md_path})")
+        if not md_path:
+            self._clear_editor()
+            self.selection_label.config(text=f"{title} (section, no page of its own)")
+            return
+        self._current_md_path = md_path
+        self.selection_label.config(text=f"Loading {title}...")
+        self.preview_button.config(state="disabled")
+        self._load_page(title, md_path)
+
+    def _load_page(self, title: str, md_path: str):
+        branch = self._current_branch
+        locale = self._selected_locale_code()
+
+        def work():
+            english = github_repo.fetch_page_source(branch, "en", md_path)
+            if locale == "en":
+                return english, english, True
+            translated = github_repo.try_fetch_page_source(branch, locale, md_path)
+            return english, translated, translated is not None
+
+        self._run_background(
+            work,
+            on_success=lambda result: self._handle_page_loaded(title, md_path, *result),
+            on_error=self._handle_browse_error,
+        )
+
+    def _handle_page_loaded(
+        self, title: str, md_path: str, english: str, locale_text: str | None, existed: bool
+    ):
+        if md_path != self._current_md_path:
+            return  # user picked something else while this was loading
+        self._english_source = english
+        self._set_text(self.english_text, english, editable=False)
+        self._set_text(self.locale_text, locale_text if locale_text is not None else english, editable=True)
+
+        self.preview_button.config(state="normal")
+        if existed:
+            self.selection_label.config(text=title)
         else:
-            self.selection_label.config(text=f"Selected: {title} (section, no page of its own)")
+            self.selection_label.config(
+                text=f"{title} -- no translation yet, starting from the English source"
+            )
+
+    def _on_locale_selected(self, _event):
+        if not self._current_md_path:
+            return  # nothing loaded yet, just a picker change
+        title = self.selection_label.cget("text")
+        self.selection_label.config(text="Loading...")
+        self.preview_button.config(state="disabled")
+        self._load_page(title, self._current_md_path)
+
+    def _set_text(self, widget: tk.Text, content: str, editable: bool):
+        widget.config(state="normal")
+        widget.delete("1.0", "end")
+        widget.insert("1.0", content)
+        widget.edit_reset()
+        widget.config(state="normal" if editable else "disabled")
+
+    def _clear_editor(self):
+        self._current_md_path = None
+        self._english_source = None
+        self._set_text(self.english_text, "", editable=False)
+        self._set_text(self.locale_text, "", editable=True)
+        self.preview_button.config(state="disabled")
+        self.selection_label.config(text="Select a page to edit.")
+
+    def _on_preview(self):
+        if not self._current_md_path or not self._branch_config:
+            return
+        content = self.locale_text.get("1.0", "end-1c")
+        title = self.selection_label.cget("text")
+        html = preview.render_html(
+            content,
+            self._branch_config["markdown_extensions"],
+            self._current_branch,
+            self._selected_locale_code(),
+            self._current_md_path,
+            title,
+        )
+        preview.open_preview(html)
 
     def _handle_browse_error(self, error: Exception):
         self.status_label.config(text="Browsing anonymously")

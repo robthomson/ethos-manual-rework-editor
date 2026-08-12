@@ -13,6 +13,7 @@ keyring>=25.0
 # Parsing mkdocs.yml (nav:, plugins.i18n.languages) fetched over the API
 PyYAML>=6.0
 
-# TODO (editor phase): markdown + pymdown-extensions, matching
-# ethos-manual-rework's own mkdocs.yml markdown_extensions: list, for an
-# accurate local preview.
+# Rendering the "Preview" button's HTML using the same extensions
+# ethos-manual-rework's own mkdocs.yml markdown_extensions: list does
+Markdown>=3.5
+pymdown-extensions>=10.0
