@@ -1,0 +1,9 @@
+# Requirements for the Ethos Manual Translator
+# Install with: pip install -r requirements_translator.txt
+#
+# The GUI itself is tkinter (Python stdlib, nothing to install). Nothing
+# else is wired up yet -- this file gains entries as each phase lands:
+#   - PyGithub, for talking to the GitHub API (auth, branches, contents, PRs)
+#   - keyring, for storing the user's PAT in the OS credential store
+#   - markdown + pymdown-extensions, matching ethos-manual-rework's own
+#     mkdocs.yml markdown_extensions: list, for an accurate local preview
