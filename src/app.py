@@ -185,17 +185,19 @@ class App(tk.Tk):
         # packed into the (deliberately narrow, sized for a tree view) left
         # pane -- these need more room than that pane has to spare, both
         # for two side-by-side fields and for locale names like "pt-BR -
-        # Português (Brasil)" to actually be readable.
-        picker_row = ttk.Frame(parent)
-        picker_row.pack(fill="x")
+        # Português (Brasil)" to actually be readable. LabelFrame to match
+        # the "Sign in" section above it rather than sitting as a bare,
+        # unbordered row.
+        picker_frame = ttk.LabelFrame(parent, text="Branch & language", padding=12)
+        picker_frame.pack(fill="x", pady=(12, 0))
 
-        ttk.Label(picker_row, text="Branch:").pack(side="left")
-        self.branch_combo = ttk.Combobox(picker_row, state="disabled", width=18)
+        ttk.Label(picker_frame, text="Branch:").pack(side="left")
+        self.branch_combo = ttk.Combobox(picker_frame, state="disabled", width=18)
         self.branch_combo.pack(side="left", padx=(4, 16))
         self.branch_combo.bind("<<ComboboxSelected>>", self._on_branch_selected)
 
-        ttk.Label(picker_row, text="Language:").pack(side="left")
-        self.locale_combo = ttk.Combobox(picker_row, state="disabled", width=28)
+        ttk.Label(picker_frame, text="Language:").pack(side="left")
+        self.locale_combo = ttk.Combobox(picker_frame, state="disabled", width=28)
         self.locale_combo.pack(side="left", padx=(4, 0))
         self.locale_combo.bind("<<ComboboxSelected>>", self._on_locale_selected)
 
