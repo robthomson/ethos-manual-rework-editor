@@ -7,15 +7,15 @@ A GUI tool for translators to edit ethos-manual-rework's per-locale docs
 pages and submit the result back as a GitHub pull request, without needing
 a local git checkout or a markdown editor of their own.
 
-Status: scaffold only. This proves out the packaging/release pipeline
-(ported from rotorflight-lua-ethos-suite-updater -- see .github/workflows/
-and src/gen_version_info.py et al) with a real, launchable window; none of
-the actual GitHub-backed functionality is wired up yet.
+Status: sign-in (this file + auth.py) is wired up and working end to end
+against real GitHub credentials. Branch/page browsing, editing, and PR
+submission are not yet -- see the plan below for what's next and which
+pieces of ethos-manual-rework's own tooling each step reuses.
 
-Planned flow (see ethos-manual-rework's own repo for the pieces to reuse):
-  1. Login       -- GitHub fine-grained PAT, pasted in once and stored via
-                     `keyring` (OS credential store). No OAuth app to
-                     register; see that repo's conversation history for why.
+Planned flow:
+  1. Login       -- DONE. GitHub fine-grained PAT, pasted in once and
+                     stored via `keyring` (OS credential store). No OAuth
+                     app to register; see auth.py's docstring for why.
   2. Branch/page  -- list branches (main + frozen version branches per
                      ethos-manual-rework's docs/en/contributing/versioning.md),
                      then walk mkdocs.yml's `nav:` for the page picker --
@@ -43,14 +43,18 @@ ethos-manual-rework's main branch: PR review.
 """
 
 import os
+import queue
 import sys
+import threading
 
 try:
     import tkinter as tk
-    from tkinter import ttk
+    from tkinter import messagebox, ttk
 except ImportError:
     print("Error: tkinter is required but not found.")
     sys.exit(1)
+
+import auth
 
 APP_TITLE = "Ethos Manual Translator"
 
@@ -70,9 +74,15 @@ class App(tk.Tk):
         self.minsize(700, 450)
         self._set_icon()
 
+        self.user: auth.SignedInUser | None = None
+        self._signin_queue: queue.Queue = queue.Queue()
+
         self._build_menu()
         self._build_body()
         self._build_status_bar()
+
+        self._poll_signin_queue()
+        self._try_auto_sign_in()
 
     def _set_icon(self):
         # Best-effort: a missing/unreadable icon shouldn't stop the app
@@ -87,8 +97,13 @@ class App(tk.Tk):
         menubar = tk.Menu(self)
 
         file_menu = tk.Menu(menubar, tearoff=False)
+        file_menu.add_command(
+            label="Sign out", command=self._on_sign_out, state="disabled"
+        )
+        file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.destroy)
         menubar.add_cascade(label="File", menu=file_menu)
+        self.file_menu = file_menu
 
         help_menu = tk.Menu(menubar, tearoff=False)
         help_menu.add_command(label="About", command=self._show_about)
@@ -109,40 +124,127 @@ class App(tk.Tk):
         ttk.Label(
             container,
             text=(
-                "Scaffold build -- packaging pipeline only.\n"
-                "Login, page browsing, editing, and PR submission are not "
-                "wired up yet."
+                "Branch/page browsing and editing are not wired up yet -- "
+                "those will work without signing in. A token is only ever "
+                "needed to submit a page for review."
             ),
             justify="left",
         ).pack(anchor="w", pady=(4, 16))
 
-        # Placeholder for the eventual step-1 login panel. Kept as a real
-        # (disabled) widget rather than just a label so the eventual swap to
-        # a working login flow is a small diff, not a rewrite.
-        login_frame = ttk.LabelFrame(container, text="1. Sign in", padding=12)
-        login_frame.pack(fill="x", pady=(0, 12))
-        ttk.Label(login_frame, text="GitHub personal access token:").pack(
+        self.login_frame = ttk.LabelFrame(
+            container, text="Sign in (only needed to submit for review)", padding=12
+        )
+        self.login_frame.pack(fill="x", pady=(0, 12))
+
+        ttk.Label(self.login_frame, text="GitHub personal access token:").pack(
             side="left"
         )
-        token_entry = ttk.Entry(login_frame, show="*", state="disabled")
-        token_entry.pack(side="left", fill="x", expand=True, padx=8)
-        ttk.Button(login_frame, text="Sign in", state="disabled").pack(side="left")
+        self.token_entry = ttk.Entry(self.login_frame, show="*")
+        self.token_entry.pack(side="left", fill="x", expand=True, padx=8)
+        self.token_entry.bind("<Return>", lambda _event: self._on_sign_in())
+
+        self.signin_button = ttk.Button(
+            self.login_frame, text="Sign in", command=self._on_sign_in
+        )
+        self.signin_button.pack(side="left")
+
+        self.signed_in_label = ttk.Label(self.login_frame, text="")
 
     def _build_status_bar(self):
         status = ttk.Frame(self, relief="sunken")
         status.pack(side="bottom", fill="x")
-        ttk.Label(status, text="Not connected to GitHub", padding=(8, 2)).pack(
-            side="left"
-        )
+        self.status_label = ttk.Label(status, text="Browsing anonymously", padding=(8, 2))
+        self.status_label.pack(side="left")
 
     def _show_about(self):
-        from tkinter import messagebox
-
         messagebox.showinfo(
             APP_TITLE,
             f"{APP_TITLE}\n\nTranslator tool for ethos-manual-rework.\n"
             "https://github.com/robthomson/ethos-manual-rework-editor",
         )
+
+    # -- Sign-in -----------------------------------------------------
+
+    def _try_auto_sign_in(self):
+        token = auth.load_token()
+        if token:
+            self.status_label.config(text="Checking saved sign-in...")
+            self._validate_in_background(token, on_bad_saved_token=auth.clear_token)
+
+    def _on_sign_in(self):
+        token = self.token_entry.get()
+        self._set_signin_busy(True)
+        self.status_label.config(text="Signing in...")
+        self._validate_in_background(token)
+
+    def _validate_in_background(self, token, on_bad_saved_token=None):
+        # Worker thread only ever touches the queue, never a Tk widget or
+        # `after` directly -- calling `after` from a non-main thread isn't
+        # reliably safe across Tk builds/platforms (raises "main thread is
+        # not in main loop" on some). _poll_signin_queue, scheduled from
+        # the main thread, is what actually dispatches the result.
+        def worker():
+            try:
+                user = auth.validate_token(token)
+            except auth.AuthError as e:
+                self._signin_queue.put(("error", e, on_bad_saved_token))
+                return
+            self._signin_queue.put(("success", user))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _poll_signin_queue(self):
+        try:
+            while True:
+                kind, *args = self._signin_queue.get_nowait()
+                if kind == "success":
+                    self._handle_signin_success(*args)
+                else:
+                    self._handle_signin_error(*args)
+        except queue.Empty:
+            pass
+        self.after(150, self._poll_signin_queue)
+
+    def _handle_signin_success(self, user: auth.SignedInUser):
+        auth.save_token(user.token)
+        self.user = user
+        self.status_label.config(text=f"Signed in as {user.login}")
+        self.file_menu.entryconfig("Sign out", state="normal")
+
+        self.token_entry.pack_forget()
+        self.signin_button.pack_forget()
+        self.signed_in_label.config(
+            text=f"Signed in as {user.name or user.login} ({user.login})"
+        )
+        self.signed_in_label.pack(side="left")
+
+    def _handle_signin_error(self, error: auth.AuthError, on_bad_saved_token):
+        self._set_signin_busy(False)
+        self.status_label.config(text="Browsing anonymously")
+        if on_bad_saved_token:
+            # A silently-attempted auto sign-in failed (e.g. token revoked
+            # since last run) -- clear it rather than retrying every
+            # launch, but don't interrupt startup with a dialog for it.
+            on_bad_saved_token()
+            return
+        messagebox.showerror("Sign in failed", str(error))
+
+    def _set_signin_busy(self, busy: bool):
+        state = "disabled" if busy else "normal"
+        self.token_entry.config(state=state)
+        self.signin_button.config(state=state)
+
+    def _on_sign_out(self):
+        auth.clear_token()
+        self.user = None
+        self.file_menu.entryconfig("Sign out", state="disabled")
+        self.status_label.config(text="Browsing anonymously")
+
+        self.signed_in_label.pack_forget()
+        self.token_entry.delete(0, tk.END)
+        self.token_entry.pack(side="left", fill="x", expand=True, padx=8)
+        self.signin_button.pack(side="left")
+        self._set_signin_busy(False)
 
 
 def main() -> int:
