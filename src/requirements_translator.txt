@@ -10,6 +10,9 @@ PyGithub>=2.3
 # Manager / macOS Keychain / Linux Secret Service) instead of a plain file
 keyring>=25.0
 
+# Parsing mkdocs.yml (nav:, plugins.i18n.languages) fetched over the API
+PyYAML>=6.0
+
 # TODO (editor phase): markdown + pymdown-extensions, matching
 # ethos-manual-rework's own mkdocs.yml markdown_extensions: list, for an
 # accurate local preview.
