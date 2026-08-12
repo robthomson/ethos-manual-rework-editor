@@ -92,6 +92,7 @@ class App(tk.Tk):
         self._branch_config: dict | None = None
         self._current_branch: str | None = None
         self._current_md_path: str | None = None
+        self._current_title: str | None = None
         self._english_source: str | None = None
 
         self._build_menu()
@@ -204,25 +205,30 @@ class App(tk.Tk):
         self.toc_tree.bind("<<TreeviewSelect>>", self._on_toc_select)
 
     def _build_editor_pane(self, parent):
-        header_row = ttk.Frame(parent)
-        header_row.pack(fill="x", pady=(0, 8))
-
-        self.selection_label = ttk.Label(header_row, text="Select a page to edit.")
-        self.selection_label.pack(side="left")
-
-        self.preview_button = ttk.Button(
-            header_row, text="Preview in browser", command=self._on_preview, state="disabled"
-        )
-        self.preview_button.pack(side="right")
-
+        # No separate page-title header -- the TOC's own highlighted
+        # selection already says which page this is. "Loading"/"no
+        # translation yet" states go on the status bar (transient/global)
+        # or the Translation column's own header (page-specific, sits
+        # right above the pane it describes) instead, and the preview
+        # button shares that same column-header row, right-aligned above
+        # the pane it acts on rather than floating alone across an empty
+        # full-width row.
         panes = ttk.Frame(parent)
         panes.pack(fill="both", expand=True)
         panes.columnconfigure(0, weight=1)
         panes.columnconfigure(1, weight=1)
         panes.rowconfigure(1, weight=1)
 
-        ttk.Label(panes, text="English (read-only)").grid(row=0, column=0, sticky="w")
-        ttk.Label(panes, text="Translation (editable)").grid(row=0, column=1, sticky="w", padx=(8, 0))
+        ttk.Label(panes, text="English (read-only)").grid(row=0, column=0, sticky="w", pady=(0, 8))
+
+        translation_header = ttk.Frame(panes)
+        translation_header.grid(row=0, column=1, sticky="ew", padx=(8, 0), pady=(0, 8))
+        self.translation_header_label = ttk.Label(translation_header, text="Translation (editable)")
+        self.translation_header_label.pack(side="left")
+        self.preview_button = ttk.Button(
+            translation_header, text="Preview in browser", command=self._on_preview, state="disabled"
+        )
+        self.preview_button.pack(side="right")
 
         self.english_text = self._make_text_pane(panes, row=1, column=0)
         self.english_text.config(state="disabled")
@@ -437,10 +443,11 @@ class App(tk.Tk):
         title = self.toc_tree.item(iid, "text")
         if not md_path:
             self._clear_editor()
-            self.selection_label.config(text=f"{title} (section, no page of its own)")
+            self.status_label.config(text=f"{title}: section, no page of its own")
             return
         self._current_md_path = md_path
-        self.selection_label.config(text=f"Loading {title}...")
+        self._current_title = title
+        self.status_label.config(text=f"Loading {title}...")
         self.preview_button.config(state="disabled")
         self._load_page(title, md_path)
 
@@ -471,20 +478,20 @@ class App(tk.Tk):
         self._set_text(self.locale_text, locale_text if locale_text is not None else english, editable=True)
 
         self.preview_button.config(state="normal")
+        self.status_label.config(text=self._default_status_text())
         if existed:
-            self.selection_label.config(text=title)
+            self.translation_header_label.config(text="Translation (editable)")
         else:
-            self.selection_label.config(
-                text=f"{title} -- no translation yet, starting from the English source"
+            self.translation_header_label.config(
+                text="Translation (editable) -- no translation yet, starting from English"
             )
 
     def _on_locale_selected(self, _event):
         if not self._current_md_path:
             return  # nothing loaded yet, just a picker change
-        title = self.selection_label.cget("text")
-        self.selection_label.config(text="Loading...")
+        self.status_label.config(text=f"Loading {self._current_title}...")
         self.preview_button.config(state="disabled")
-        self._load_page(title, self._current_md_path)
+        self._load_page(self._current_title, self._current_md_path)
 
     def _set_text(self, widget: tk.Text, content: str, editable: bool):
         widget.config(state="normal")
@@ -495,17 +502,18 @@ class App(tk.Tk):
 
     def _clear_editor(self):
         self._current_md_path = None
+        self._current_title = None
         self._english_source = None
         self._set_text(self.english_text, "", editable=False)
         self._set_text(self.locale_text, "", editable=True)
         self.preview_button.config(state="disabled")
-        self.selection_label.config(text="Select a page to edit.")
+        self.translation_header_label.config(text="Translation (editable)")
 
     def _on_preview(self):
         if not self._current_md_path or not self._branch_config:
             return
         content = self.locale_text.get("1.0", "end-1c")
-        title = self.selection_label.cget("text")
+        title = self._current_title or self._current_md_path
         html = preview.render_html(
             content,
             self._branch_config["markdown_extensions"],
