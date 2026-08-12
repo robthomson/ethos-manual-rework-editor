@@ -202,6 +202,12 @@ class App(tk.Tk):
         self.locale_combo.bind("<<ComboboxSelected>>", self._on_locale_selected)
 
     def _build_browse_pane(self, parent):
+        # Matches the "English (read-only)"/"Translation (editable)"
+        # labels' height and spacing (pady=(0, 8)) so the TOC's bordered
+        # box top-aligns with the two text panes' instead of starting a
+        # row higher, flush with their labels.
+        ttk.Label(parent, text="Table of contents").pack(anchor="w", pady=(0, 14))
+
         self.toc_tree = ttk.Treeview(parent, show="tree")
         self.toc_tree.pack(fill="both", expand=True)
         self.toc_tree.bind("<<TreeviewSelect>>", self._on_toc_select)
