@@ -100,8 +100,10 @@ class App(tk.Tk):
         self._build_status_bar()
 
         self._poll_bg_queue()
+        # _try_auto_sign_in() kicks off _load_branches() itself once it's
+        # resolved either way -- see its docstring for why that ordering
+        # matters here.
         self._try_auto_sign_in()
-        self._load_branches()
 
     def _set_icon(self):
         # Best-effort: a missing/unreadable icon shouldn't stop the app
@@ -314,14 +316,31 @@ class App(tk.Tk):
     # -- Sign-in ---------------------------------------------------------
 
     def _try_auto_sign_in(self):
+        # Called once, from __init__, before the first branch/TOC load --
+        # not just at some point during startup. If there's a stored token,
+        # github_repo needs the chance to switch to it (see
+        # github_repo.set_token(), called from _handle_signin_success)
+        # *before* anything makes its first repo API call, or that first
+        # call goes out on the anonymous client regardless of whether a
+        # good token was sitting right there -- hit this for real: a
+        # rate-limited "looking up the repo" error, immediately followed
+        # by sign-in completing, because the two were racing each other on
+        # startup instead of being sequenced. Both branches (a token
+        # exists, or there isn't one to check) end in _load_branches().
         token = auth.load_token()
-        if token:
-            self.status_label.config(text="Checking saved sign-in...")
-            self._run_background(
-                lambda: auth.validate_token(token),
-                on_success=self._handle_signin_success,
-                on_error=self._handle_auto_signin_error,
-            )
+        if not token:
+            self._load_branches()
+            return
+        self.status_label.config(text="Checking saved sign-in...")
+        self._run_background(
+            lambda: auth.validate_token(token),
+            on_success=self._handle_auto_signin_success,
+            on_error=self._handle_auto_signin_error,
+        )
+
+    def _handle_auto_signin_success(self, user: auth.SignedInUser):
+        self._handle_signin_success(user)
+        self._load_branches()
 
     def _on_sign_in(self):
         token = self.token_entry.get()
@@ -364,6 +383,7 @@ class App(tk.Tk):
         self.status_label.config(text=self._default_status_text())
         if error.invalid_credential:
             auth.clear_token()
+        self._load_branches()
 
     def _set_signin_busy(self, busy: bool):
         state = "disabled" if busy else "normal"
