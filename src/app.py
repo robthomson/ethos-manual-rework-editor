@@ -146,9 +146,10 @@ class App(tk.Tk):
         ).pack(anchor="w", pady=(4, 12))
 
         self._build_login_frame(outer)
+        self._build_picker_row(outer)
 
         main_paned = ttk.PanedWindow(outer, orient="horizontal")
-        main_paned.pack(fill="both", expand=True, pady=(12, 0))
+        main_paned.pack(fill="both", expand=True, pady=(8, 0))
 
         left = ttk.Frame(main_paned)
         main_paned.add(left, weight=1)
@@ -178,22 +179,26 @@ class App(tk.Tk):
 
         self.signed_in_label = ttk.Label(self.login_frame, text="")
 
-    def _build_browse_pane(self, parent):
+    def _build_picker_row(self, parent):
+        # Its own full-width row above the TOC/editor split, rather than
+        # packed into the (deliberately narrow, sized for a tree view) left
+        # pane -- these need more room than that pane has to spare, both
+        # for two side-by-side fields and for locale names like "pt-BR -
+        # Português (Brasil)" to actually be readable.
         picker_row = ttk.Frame(parent)
-        picker_row.pack(fill="x", pady=(0, 8))
+        picker_row.pack(fill="x")
 
-        ttk.Label(picker_row, text="Branch:").grid(row=0, column=0, sticky="w")
-        self.branch_combo = ttk.Combobox(picker_row, state="disabled")
-        self.branch_combo.grid(row=0, column=1, sticky="ew", padx=(4, 0), pady=(0, 4))
+        ttk.Label(picker_row, text="Branch:").pack(side="left")
+        self.branch_combo = ttk.Combobox(picker_row, state="disabled", width=18)
+        self.branch_combo.pack(side="left", padx=(4, 16))
         self.branch_combo.bind("<<ComboboxSelected>>", self._on_branch_selected)
 
-        ttk.Label(picker_row, text="Language:").grid(row=1, column=0, sticky="w")
-        self.locale_combo = ttk.Combobox(picker_row, state="disabled")
-        self.locale_combo.grid(row=1, column=1, sticky="ew", padx=(4, 0))
+        ttk.Label(picker_row, text="Language:").pack(side="left")
+        self.locale_combo = ttk.Combobox(picker_row, state="disabled", width=28)
+        self.locale_combo.pack(side="left", padx=(4, 0))
         self.locale_combo.bind("<<ComboboxSelected>>", self._on_locale_selected)
 
-        picker_row.columnconfigure(1, weight=1)
-
+    def _build_browse_pane(self, parent):
         self.toc_tree = ttk.Treeview(parent, show="tree")
         self.toc_tree.pack(fill="both", expand=True)
         self.toc_tree.bind("<<TreeviewSelect>>", self._on_toc_select)
