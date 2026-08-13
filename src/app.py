@@ -278,6 +278,17 @@ class App(tk.Tk):
             submit_row, text="View PR", command=self._on_view_pr, state="disabled"
         )
         self.view_pr_button.pack(side="left", padx=(8, 0))
+        self.mark_ready_button = ttk.Button(
+            submit_row,
+            text="Mark ready for review",
+            command=self._on_mark_ready,
+            state="disabled",
+        )
+        self.mark_ready_button.pack(side="left", padx=(8, 0))
+        self.discard_pr_button = ttk.Button(
+            submit_row, text="Discard & reset", command=self._on_discard_pr, state="disabled"
+        )
+        self.discard_pr_button.pack(side="left", padx=(8, 0))
 
         self.submit_button = ttk.Button(
             submit_row, text="Submit for review", command=self._on_submit, state="disabled"
@@ -608,19 +619,28 @@ class App(tk.Tk):
             # never itself a translation to submit.
             self.submit_button.config(state="disabled", text="Submit for review")
             self.view_pr_button.config(state="disabled")
+            self.mark_ready_button.config(state="disabled")
+            self.discard_pr_button.config(state="disabled")
             self.pr_status_label.config(text="")
             return
 
+        pr = self._current_pr
         self.submit_button.config(
-            state="normal",
-            text=f"Update PR #{self._current_pr.number}" if self._current_pr else "Submit for review",
+            state="normal", text=f"Update PR #{pr.number}" if pr else "Submit for review"
         )
-        if self._current_pr:
-            self.view_pr_button.config(state="normal")
-            self.pr_status_label.config(text=f"Continuing open PR #{self._current_pr.number}")
-        else:
-            self.view_pr_button.config(state="disabled")
+        self.view_pr_button.config(state="normal" if pr else "disabled")
+        self.discard_pr_button.config(state="normal" if pr else "disabled")
+        # Only a draft PR has anything to "mark ready" -- once it's a real,
+        # non-draft PR, further edits should still update it (submit_button
+        # above), just without this action being meaningful anymore.
+        self.mark_ready_button.config(state="normal" if (pr and pr.draft) else "disabled")
+
+        if not pr:
             self.pr_status_label.config(text="")
+        elif pr.draft:
+            self.pr_status_label.config(text=f"Continuing draft PR #{pr.number}")
+        else:
+            self.pr_status_label.config(text=f"Continuing open PR #{pr.number} (ready for review)")
 
     def _on_locale_selected(self, _event):
         if not self._current_md_path:
@@ -629,6 +649,8 @@ class App(tk.Tk):
         self.preview_button.config(state="disabled")
         self.submit_button.config(state="disabled")
         self.view_pr_button.config(state="disabled")
+        self.mark_ready_button.config(state="disabled")
+        self.discard_pr_button.config(state="disabled")
         self.pr_status_label.config(text="")
         self._load_page(self._current_title, self._current_md_path)
 
@@ -651,6 +673,8 @@ class App(tk.Tk):
         self.preview_button.config(state="disabled")
         self.submit_button.config(state="disabled", text="Submit for review")
         self.view_pr_button.config(state="disabled")
+        self.mark_ready_button.config(state="disabled")
+        self.discard_pr_button.config(state="disabled")
         self.pr_status_label.config(text="")
         self.translation_header_label.config(text="Translation (editable)")
 
@@ -687,6 +711,8 @@ class App(tk.Tk):
         self.toc_tree.config(selectmode="none" if locked else "browse")
         if locked:
             self.submit_button.config(state="disabled")
+            self.mark_ready_button.config(state="disabled")
+            self.discard_pr_button.config(state="disabled")
 
     def _on_submit(self):
         if not self._current_md_path or not self._current_branch:
@@ -746,8 +772,16 @@ class App(tk.Tk):
         self._current_pr = pr
         self._set_editor_locked(False)
         self._update_pr_ui()
+        # New PRs start as drafts (see submit.py's docstring for why) --
+        # worth saying so here specifically, not just "is ready", since
+        # a draft is deliberately *not* ready for review yet.
+        state_note = (
+            "It's a draft -- use \"Mark ready for review\" once you're done editing."
+            if pr.draft
+            else "It's ready for review."
+        )
         if messagebox.askyesno(
-            "Submitted", f"Pull request #{pr.number} is ready.\n\n{pr.url}\n\nOpen it now?"
+            "Submitted", f"Pull request #{pr.number} is up to date.\n\n{pr.url}\n\n{state_note}\n\nOpen it now?"
         ):
             webbrowser.open(pr.url)
 
@@ -755,6 +789,64 @@ class App(tk.Tk):
         self._set_editor_locked(False)
         self._update_pr_ui()
         messagebox.showerror("Submit failed", str(error))
+
+    def _on_mark_ready(self):
+        if not self._current_pr or not self._current_pr.draft:
+            return
+        if not messagebox.askyesno(
+            "Mark ready for review?",
+            f"This tells reviewers PR #{self._current_pr.number} is done and ready to "
+            f"look at. You can still push further edits afterward if needed. Continue?",
+        ):
+            return
+        self._set_editor_locked(True)
+        self.pr_status_label.config(text="Marking ready for review...")
+        self._run_background(
+            lambda: submit.mark_ready_for_review(self._current_pr.number),
+            on_success=self._handle_mark_ready_success,
+            on_error=self._handle_submit_error,
+        )
+
+    def _handle_mark_ready_success(self, pr: submit.PullRequestInfo):
+        self._current_pr = pr
+        self._set_editor_locked(False)
+        self._update_pr_ui()
+        messagebox.showinfo(
+            "Marked ready for review", f"PR #{pr.number} is now ready for review.\n\n{pr.url}"
+        )
+
+    def _on_discard_pr(self):
+        if not self._current_pr:
+            return
+        pr = self._current_pr
+        warning = (
+            "" if pr.draft else "This PR is already marked ready for review -- "
+            "reviewers may already be looking at it. "
+        )
+        if not messagebox.askyesno(
+            "Discard this pull request?",
+            f"This closes PR #{pr.number} and deletes its branch. {warning}"
+            f"Your edits there are gone -- you'll go back to editing the current "
+            f"translation on {self._current_branch}. This can't be undone. Continue?",
+        ):
+            return
+        self._set_editor_locked(True)
+        self.pr_status_label.config(text="Discarding...")
+        self._run_background(
+            lambda: submit.discard_pr(pr.number, pr.branch),
+            on_success=self._handle_discard_success,
+            on_error=self._handle_submit_error,
+        )
+
+    def _handle_discard_success(self, _result):
+        self._current_pr = None
+        self._set_editor_locked(False)
+        self._update_pr_ui()
+        # Reload the page so the editor reflects the (now un-shadowed)
+        # base-branch translation instead of the discarded PR's content
+        # still sitting in the text pane.
+        if self._current_md_path:
+            self._load_page(self._current_title, self._current_md_path)
 
     def _handle_browse_error(self, error: Exception):
         self.status_label.config(text=self._default_status_text())
