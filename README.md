@@ -5,12 +5,33 @@ sign in with a GitHub token, pick a page, edit your language's version next
 to the English source, and submit the result as a pull request -- no local
 git checkout or markdown editor of your own required.
 
-**Status: early scaffold.** The packaging/release pipeline (ported from
-[rotorflight-lua-ethos-suite-updater](https://github.com/rotorflight/rotorflight-lua-ethos-suite-updater),
-same build-and-release-per-OS approach) is in place and produces a real,
-launchable window -- login, page browsing, editing, and PR submission
-aren't wired up yet. See `src/app.py`'s module docstring for the planned
-flow and which pieces of ethos-manual-rework's own tooling it'll reuse.
+**Status: working end to end.** Sign-in, branch/language/page browsing, the
+side-by-side editor with live preview, and submitting as a pull request are
+all wired up and verified against the real, live repo. See `src/app.py`'s
+module docstring for how each piece fits together and which pieces of
+ethos-manual-rework's own tooling (nav parsing, the `translated_from:`
+staleness convention, etc.) it reuses.
+
+## Setting up your GitHub token
+
+Submitting a translation needs a **fine-grained personal access token**
+([create one here](https://github.com/settings/personal-access-tokens/new)),
+pasted into the app's "Sign in" box (only needed at submit time -- browsing
+and editing don't require signing in at all). Two separate settings on that
+page both need to be right, and it's easy to set one and miss the other:
+
+- **Repository access** -- "Only select repositories" -> `ethos-manual-rework`.
+  (Leaving this on "Public Repositories (read-only)" silently caps the
+  token to read-only regardless of the permissions below.)
+- **Permissions** -- both of these, not just one:
+  - **Contents: Read and write** (needed to commit the edited page)
+  - **Pull requests: Read and write** (needed to open the PR -- a
+    genuinely separate permission from Contents; having Contents alone
+    gets you a real commit but a 403 on the PR itself)
+
+If a permission is missing, the app's error message says which one --
+worth reading closely if submitting fails, rather than assuming the whole
+token is bad.
 
 ## Download
 
@@ -38,7 +59,8 @@ pip install -r requirements_translator.txt
 python app.py
 ```
 
-or on Linux/macOS, `./run_app.sh` (checks for tkinter/deps first).
+or `run_app.cmd` (Windows) / `./run_app.sh` (Linux/macOS) once dependencies
+are installed.
 
 ### Building a standalone executable
 

@@ -25,12 +25,35 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from github import InputGitTreeElement
-from github.GithubException import UnknownObjectException
+from github.GithubException import GithubException, UnknownObjectException
 
 import frontmatter
-from github_repo import REPO_SLUG, _repo, _wrap_errors
+from github_repo import REPO_SLUG, RepoError, _repo, _wrap_errors
 
 _OWNER = REPO_SLUG.split("/")[0]
+
+
+def _wrap_permission_error(action: str, needed: str, fn):
+    """Like _wrap_errors, but recognizes the specific 403 "Resource not
+    accessible by personal access token" GitHub returns when a
+    fine-grained PAT is missing one particular permission, and says which
+    one -- rather than the raw API response this project's own live
+    testing hit, twice, for two genuinely different permissions gating two
+    different steps of one submit (Contents for the commit, separately
+    Pull requests for opening the PR -- Contents: write alone isn't
+    enough). Anything else propagates for _wrap_errors, wrapping this
+    call, to handle with its own generic messages."""
+    try:
+        return fn()
+    except GithubException as e:
+        message = str(e.data.get("message", "")) if isinstance(e.data, dict) else ""
+        if e.status == 403 and "not accessible" in message.lower():
+            raise RepoError(
+                f"GitHub rejected {action}: this token doesn't have '{needed}' "
+                f"permission on {REPO_SLUG}. Check the fine-grained PAT's permissions "
+                f"include '{needed}: Read and write' for this repo, then try again."
+            ) from e
+        raise
 
 
 @dataclass
@@ -98,27 +121,40 @@ def submit_translation(
         new_frontmatter = {**existing_frontmatter, "translated_from": english_sha}
         content = frontmatter.join(new_frontmatter, body_text)
 
-        base_ref = repo.get_git_ref(f"heads/{base_branch}")
-        base_commit = repo.get_git_commit(base_ref.object.sha)
+        # Two distinct fine-grained PAT permissions gate two distinct steps
+        # here -- Contents for the commit itself, separately Pull requests
+        # for opening the PR. Wrapped individually (not just the one outer
+        # _wrap_errors below) so a 403 says which one is missing instead of
+        # both surfacing as the same generic error -- this project's own
+        # live testing hit both, one after the other, confirming they
+        # really are independent gates and not the same underlying cause.
+        def create_commit():
+            base_ref = repo.get_git_ref(f"heads/{base_branch}")
+            base_commit = repo.get_git_commit(base_ref.object.sha)
 
-        blob = repo.create_git_blob(content, "utf-8")
-        tree = repo.create_git_tree(
-            [InputGitTreeElement(path=docs_path, mode="100644", type="blob", sha=blob.sha)],
-            base_tree=base_commit.tree,
-        )
-        commit = repo.create_git_commit(pr_title, tree, [base_commit])
+            blob = repo.create_git_blob(content, "utf-8")
+            tree = repo.create_git_tree(
+                [InputGitTreeElement(path=docs_path, mode="100644", type="blob", sha=blob.sha)],
+                base_tree=base_commit.tree,
+            )
+            new_commit = repo.create_git_commit(pr_title, tree, [base_commit])
 
-        try:
-            ref = repo.get_git_ref(f"heads/{target_branch}")
-            ref.edit(commit.sha, force=True)
-        except UnknownObjectException:
-            repo.create_git_ref(f"refs/heads/{target_branch}", commit.sha)
+            try:
+                ref = repo.get_git_ref(f"heads/{target_branch}")
+                ref.edit(new_commit.sha, force=True)
+            except UnknownObjectException:
+                repo.create_git_ref(f"refs/heads/{target_branch}", new_commit.sha)
+
+        _wrap_permission_error("committing the translation", "Contents", create_commit)
 
         existing = find_open_pr(base_branch, locale, md_path)
         if existing:
             return existing
 
-        pr = repo.create_pull(title=pr_title, body=pr_body, head=target_branch, base=base_branch)
-        return PullRequestInfo(number=pr.number, url=pr.html_url, branch=target_branch)
+        def open_pr():
+            pr = repo.create_pull(title=pr_title, body=pr_body, head=target_branch, base=base_branch)
+            return PullRequestInfo(number=pr.number, url=pr.html_url, branch=target_branch)
+
+        return _wrap_permission_error("opening the pull request", "Pull requests", open_pr)
 
     return _wrap_errors("submitting the translation", work)
