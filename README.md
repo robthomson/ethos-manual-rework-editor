@@ -23,11 +23,19 @@ page both need to be right, and it's easy to set one and miss the other:
 - **Repository access** -- "Only select repositories" -> `ethos-manual-rework`.
   (Leaving this on "Public Repositories (read-only)" silently caps the
   token to read-only regardless of the permissions below.)
-- **Permissions** -- both of these, not just one:
+- **Permissions** -- add both of these (the "Add permissions" button on the
+  token's Permissions tab):
   - **Contents: Read and write** (needed to commit the edited page)
-  - **Pull requests: Read and write** (needed to open the PR -- a
-    genuinely separate permission from Contents; having Contents alone
-    gets you a real commit but a 403 on the PR itself)
+  - **Pull requests: Read and write** (needed to open the PR, mark it
+    ready for review, or discard it -- a genuinely separate permission
+    from Contents; having Contents alone gets you a real commit but a
+    403 on anything PR-related)
+
+  A third permission, **Metadata: Read-only**, will appear on its own,
+  tagged "Required" and locked -- GitHub adds that automatically
+  whenever any other repository permission is selected. Nothing to set
+  there, it's not something you add yourself; only Contents and Pull
+  requests need your attention.
 
 If a permission is missing, the app's error message says which one --
 worth reading closely if submitting fails, rather than assuming the whole
