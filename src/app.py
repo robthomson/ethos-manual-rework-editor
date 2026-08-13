@@ -62,6 +62,7 @@ except ImportError:
     sys.exit(1)
 
 import auth
+import frontmatter
 import github_repo
 import preview
 
@@ -94,6 +95,10 @@ class App(tk.Tk):
         self._current_md_path: str | None = None
         self._current_title: str | None = None
         self._english_source: str | None = None
+        # translated_from: <sha> frontmatter, stripped from the displayed
+        # locale text (see frontmatter.py) -- kept here so a future save
+        # step can re-attach it, bumped to the current English commit.
+        self._locale_frontmatter: dict = {}
 
         self._build_menu()
         self._build_body()
@@ -501,9 +506,26 @@ class App(tk.Tk):
     ):
         if md_path != self._current_md_path:
             return  # user picked something else while this was loading
-        self._english_source = english
-        self._set_text(self.english_text, english, editable=False)
-        self._set_text(self.locale_text, locale_text if locale_text is not None else english, editable=True)
+
+        # Strip the translated_from: <sha> frontmatter (see frontmatter.py)
+        # before displaying -- it's bookkeeping for
+        # ethos-manual-rework's hooks/i18n_status.py staleness check, not
+        # page content, and translators shouldn't have to look at or risk
+        # mangling it. Kept in self._locale_frontmatter so a future save
+        # step can re-attach it, bumped to the new English commit. English
+        # itself is never expected to carry this (it's the thing
+        # translations are compared against), but split it too on the
+        # off chance -- displaying a stray frontmatter block would be
+        # exactly the clutter this is meant to avoid.
+        _, english_body = frontmatter.split(english)
+        if locale_text is not None:
+            self._locale_frontmatter, locale_body = frontmatter.split(locale_text)
+        else:
+            self._locale_frontmatter, locale_body = {}, english_body
+
+        self._english_source = english_body
+        self._set_text(self.english_text, english_body, editable=False)
+        self._set_text(self.locale_text, locale_body, editable=True)
 
         self.preview_button.config(state="normal")
         self.status_label.config(text=self._default_status_text())
@@ -532,6 +554,7 @@ class App(tk.Tk):
         self._current_md_path = None
         self._current_title = None
         self._english_source = None
+        self._locale_frontmatter = {}
         self._set_text(self.english_text, "", editable=False)
         self._set_text(self.locale_text, "", editable=True)
         self.preview_button.config(state="disabled")
