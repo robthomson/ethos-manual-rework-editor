@@ -7,10 +7,10 @@ A GUI tool for translators to edit ethos-manual-rework's per-locale docs
 pages and submit the result back as a GitHub pull request, without needing
 a local git checkout or a markdown editor of their own.
 
-Status: sign-in (auth.py), browsing (github_repo.py), and the editor itself
+Status: sign-in (auth.py), browsing (github_repo.py), the editor itself
 (English read-only + target-locale editable panes, "Preview" rendering via
-preview.py) are wired up and working end to end against the real, live,
-public repo. PR submission is not yet.
+preview.py), and submitting as a PR (submit.py) are all wired up and
+working end to end against the real, live, public repo.
 
 Planned flow:
   1. Login       -- DONE (auth.py). GitHub fine-grained PAT, pasted in once
@@ -32,15 +32,21 @@ Planned flow:
                      load. Known gap: swapping in a *replacement* image
                      (this repo's screenshots are per-locale, not shared)
                      isn't handled -- that's a save-step concern, see below.
-  4. Save         -- create/update a translate/<locale>/<slug> branch,
-                     commit via the Contents API using the translator's own
-                     token, bump `translated_from:` frontmatter to the
-                     English page's current commit SHA (same convention as
-                     ethos-manual-rework's hooks/i18n_status.py checks),
-                     open a PR. ethos-manual-rework's pr-preview.yml then
-                     comments a live preview link automatically. Needs to
-                     also cover replacing a page's screenshots, not just
-                     its markdown text -- not designed yet.
+  4. Save         -- DONE (submit.py). One atomic commit via the Git Data
+                     API (blob/tree/commit/ref -- not a local git clone,
+                     see that file's docstring for why), translated_from:
+                     bumped to the English page's current commit SHA (same
+                     convention ethos-manual-rework's hooks/i18n_status.py
+                     checks), opens or updates a PR. The branch name is
+                     fully deterministic (locale + page path, nothing
+                     else), so whether a page already has an open PR is
+                     answered by asking GitHub live rather than tracking
+                     anything locally -- reopening the app and picking a
+                     page with an open PR resumes from that PR's branch
+                     instead of quietly reloading (and risking
+                     overwriting) it from the base branch. Still missing:
+                     replacing a page's screenshots, not just its markdown
+                     text -- not designed yet.
 
 Locale assignment (translators.yml -> github username -> locale) is a soft,
 advisory check here -- there's no server to be a hard gate once this is a
@@ -53,6 +59,7 @@ import os
 import queue
 import sys
 import threading
+import webbrowser
 
 try:
     import tkinter as tk
@@ -65,6 +72,7 @@ import auth
 import frontmatter
 import github_repo
 import preview
+import submit
 
 APP_TITLE = "Ethos Manual Translator"
 
@@ -96,9 +104,20 @@ class App(tk.Tk):
         self._current_title: str | None = None
         self._english_source: str | None = None
         # translated_from: <sha> frontmatter, stripped from the displayed
-        # locale text (see frontmatter.py) -- kept here so a future save
-        # step can re-attach it, bumped to the current English commit.
+        # locale text (see frontmatter.py) -- kept here so the save step
+        # can re-attach it, bumped to the current English commit.
         self._locale_frontmatter: dict = {}
+        # Set from submit.find_open_pr() when the current page already has
+        # an open PR (checked on every load, not just after submitting --
+        # see submit.py's docstring for why that's enough to resume
+        # correctly across app restarts with no local state of our own).
+        self._current_pr: submit.PullRequestInfo | None = None
+        # True for the duration of a submit -- see _set_editor_locked().
+        self._editor_locked = False
+        # Bumped on every _load_page() call; see that method for why this
+        # is needed on top of the md_path check already in
+        # _handle_page_loaded().
+        self._load_generation = 0
 
         self._build_menu()
         self._build_body()
@@ -249,6 +268,21 @@ class App(tk.Tk):
         self.english_text.config(state="disabled")
 
         self.locale_text = self._make_text_pane(panes, row=1, column=1, padx=(8, 0))
+
+        submit_row = ttk.Frame(parent)
+        submit_row.pack(fill="x", pady=(8, 0))
+
+        self.pr_status_label = ttk.Label(submit_row, text="")
+        self.pr_status_label.pack(side="left")
+        self.view_pr_button = ttk.Button(
+            submit_row, text="View PR", command=self._on_view_pr, state="disabled"
+        )
+        self.view_pr_button.pack(side="left", padx=(8, 0))
+
+        self.submit_button = ttk.Button(
+            submit_row, text="Submit for review", command=self._on_submit, state="disabled"
+        )
+        self.submit_button.pack(side="right")
 
     def _make_text_pane(self, parent, row: int, column: int, padx=0) -> tk.Text:
         # The Text + Scrollbar pair share a wrapper frame (packed together
@@ -488,35 +522,64 @@ class App(tk.Tk):
         branch = self._current_branch
         locale = self._selected_locale_code()
 
+        # Not just a md_path check on arrival (below) -- that alone doesn't
+        # catch two loads *for the same page* racing each other, which
+        # switching locale quickly enough can trigger (md_path doesn't
+        # change, only locale does). A monotonic generation counter,
+        # captured now and compared on arrival, discards any result that
+        # isn't from the most recent call to this method, regardless of
+        # what changed between them. Hit this for real while testing: a
+        # slow English-locale load's result landed after a fast
+        # French-locale one, silently overwriting the French text on
+        # screen with English while showing no error at all.
+        self._load_generation += 1
+        my_generation = self._load_generation
+
         def work():
             english = github_repo.fetch_page_source(branch, "en", md_path)
             if locale == "en":
-                return english, english, True
-            translated = github_repo.try_fetch_page_source(branch, locale, md_path)
-            return english, translated, translated is not None
+                return english, english, True, None
+            # Check for an already-open PR *before* fetching the locale's
+            # content, and fetch from its branch instead of base if one
+            # exists -- see submit.py's docstring for why this is what
+            # makes reopening an in-progress translation resume correctly
+            # instead of quietly reloading (and risking overwriting) it
+            # from the base branch.
+            existing_pr = submit.find_open_pr(branch, locale, md_path)
+            source_branch = existing_pr.branch if existing_pr else branch
+            translated = github_repo.try_fetch_page_source(source_branch, locale, md_path)
+            return english, translated, translated is not None, existing_pr
 
         self._run_background(
             work,
-            on_success=lambda result: self._handle_page_loaded(title, md_path, *result),
+            on_success=lambda result: self._handle_page_loaded(my_generation, md_path, *result),
             on_error=self._handle_browse_error,
         )
 
     def _handle_page_loaded(
-        self, title: str, md_path: str, english: str, locale_text: str | None, existed: bool
+        self,
+        generation: int,
+        md_path: str,
+        english: str,
+        locale_text: str | None,
+        existed: bool,
+        existing_pr: submit.PullRequestInfo | None,
     ):
+        if generation != self._load_generation:
+            return  # a newer load has started since this one was kicked off
         if md_path != self._current_md_path:
-            return  # user picked something else while this was loading
+            return  # belt and braces -- shouldn't be reachable if the above already caught it
 
         # Strip the translated_from: <sha> frontmatter (see frontmatter.py)
         # before displaying -- it's bookkeeping for
         # ethos-manual-rework's hooks/i18n_status.py staleness check, not
         # page content, and translators shouldn't have to look at or risk
-        # mangling it. Kept in self._locale_frontmatter so a future save
-        # step can re-attach it, bumped to the new English commit. English
-        # itself is never expected to carry this (it's the thing
-        # translations are compared against), but split it too on the
-        # off chance -- displaying a stray frontmatter block would be
-        # exactly the clutter this is meant to avoid.
+        # mangling it. Kept in self._locale_frontmatter so submit.py can
+        # re-attach it, bumped to the new English commit. English itself
+        # is never expected to carry this (it's the thing translations are
+        # compared against), but split it too on the off chance --
+        # displaying a stray frontmatter block would be exactly the
+        # clutter this is meant to avoid.
         _, english_body = frontmatter.split(english)
         if locale_text is not None:
             self._locale_frontmatter, locale_body = frontmatter.split(locale_text)
@@ -524,6 +587,7 @@ class App(tk.Tk):
             self._locale_frontmatter, locale_body = {}, english_body
 
         self._english_source = english_body
+        self._current_pr = existing_pr
         self._set_text(self.english_text, english_body, editable=False)
         self._set_text(self.locale_text, locale_body, editable=True)
 
@@ -535,12 +599,37 @@ class App(tk.Tk):
             self.translation_header_label.config(
                 text="Translation (editable) -- no translation yet, starting from English"
             )
+        self._update_pr_ui()
+
+    def _update_pr_ui(self):
+        locale = self._selected_locale_code()
+        if locale == "en":
+            # English is the source everything else is compared against --
+            # never itself a translation to submit.
+            self.submit_button.config(state="disabled", text="Submit for review")
+            self.view_pr_button.config(state="disabled")
+            self.pr_status_label.config(text="")
+            return
+
+        self.submit_button.config(
+            state="normal",
+            text=f"Update PR #{self._current_pr.number}" if self._current_pr else "Submit for review",
+        )
+        if self._current_pr:
+            self.view_pr_button.config(state="normal")
+            self.pr_status_label.config(text=f"Continuing open PR #{self._current_pr.number}")
+        else:
+            self.view_pr_button.config(state="disabled")
+            self.pr_status_label.config(text="")
 
     def _on_locale_selected(self, _event):
         if not self._current_md_path:
             return  # nothing loaded yet, just a picker change
         self.status_label.config(text=f"Loading {self._current_title}...")
         self.preview_button.config(state="disabled")
+        self.submit_button.config(state="disabled")
+        self.view_pr_button.config(state="disabled")
+        self.pr_status_label.config(text="")
         self._load_page(self._current_title, self._current_md_path)
 
     def _set_text(self, widget: tk.Text, content: str, editable: bool):
@@ -551,13 +640,18 @@ class App(tk.Tk):
         widget.config(state="normal" if editable else "disabled")
 
     def _clear_editor(self):
+        self._load_generation += 1  # invalidate any load still in flight
         self._current_md_path = None
         self._current_title = None
         self._english_source = None
         self._locale_frontmatter = {}
+        self._current_pr = None
         self._set_text(self.english_text, "", editable=False)
         self._set_text(self.locale_text, "", editable=True)
         self.preview_button.config(state="disabled")
+        self.submit_button.config(state="disabled", text="Submit for review")
+        self.view_pr_button.config(state="disabled")
+        self.pr_status_label.config(text="")
         self.translation_header_label.config(text="Translation (editable)")
 
     def _on_preview(self):
@@ -574,6 +668,93 @@ class App(tk.Tk):
             title,
         )
         preview.open_preview(html)
+
+    def _on_view_pr(self):
+        if self._current_pr:
+            webbrowser.open(self._current_pr.url)
+
+    def _set_editor_locked(self, locked: bool):
+        # Branch/locale/page selection would each fire their own
+        # _load_page() if left interactive mid-submit -- racing the
+        # submit's own completion handler, which assumes locale_combo.get()
+        # still matches what was actually submitted. selectmode="none"
+        # rather than a "disabled" Treeview state: simpler, and the visual
+        # graying-out isn't the point here, blocking the click is.
+        self._editor_locked = locked
+        combo_state = "disabled" if locked else "readonly"
+        self.branch_combo.config(state=combo_state)
+        self.locale_combo.config(state=combo_state)
+        self.toc_tree.config(selectmode="none" if locked else "browse")
+        if locked:
+            self.submit_button.config(state="disabled")
+
+    def _on_submit(self):
+        if not self._current_md_path or not self._current_branch:
+            return
+        locale = self._selected_locale_code()
+        if locale == "en":
+            return  # submit_button is disabled for English; belt and braces
+
+        if not self.user:
+            messagebox.showinfo(
+                "Sign in required",
+                "Submitting opens a pull request as you, so it needs your own "
+                "GitHub credentials -- sign in above first.",
+            )
+            return
+
+        locale_display = github_repo.locale_names(self._branch_config).get(locale, locale)
+        action = "update the existing" if self._current_pr else "open a new"
+        if not messagebox.askyesno(
+            "Submit for review?",
+            f'This will {action} pull request on GitHub with your edits to '
+            f'"{self._current_title}" ({locale_display}). Continue?',
+        ):
+            return
+
+        body_text = self.locale_text.get("1.0", "end-1c")
+        pr_title = f'Translate "{self._current_title}" to {locale_display}'
+        pr_body = (
+            f"Translated `docs/{locale}/{self._current_md_path}` to {locale_display} "
+            f"using [Ethos Manual Translator]"
+            f"(https://github.com/robthomson/ethos-manual-rework-editor).\n\n"
+            f"Submitted by @{self.user.login}."
+        )
+
+        # Locked for the duration, not just the submit button -- switching
+        # branch/locale/page mid-submit would fire its own _load_page()
+        # concurrently, racing this call's own UI update on completion
+        # (locale_combo.get() no longer necessarily matching what was
+        # actually submitted by the time it finishes).
+        self._set_editor_locked(True)
+        self.pr_status_label.config(text="Submitting...")
+        self._run_background(
+            lambda: submit.submit_translation(
+                base_branch=self._current_branch,
+                locale=locale,
+                md_path=self._current_md_path,
+                body_text=body_text,
+                existing_frontmatter=self._locale_frontmatter,
+                pr_title=pr_title,
+                pr_body=pr_body,
+            ),
+            on_success=self._handle_submit_success,
+            on_error=self._handle_submit_error,
+        )
+
+    def _handle_submit_success(self, pr: submit.PullRequestInfo):
+        self._current_pr = pr
+        self._set_editor_locked(False)
+        self._update_pr_ui()
+        if messagebox.askyesno(
+            "Submitted", f"Pull request #{pr.number} is ready.\n\n{pr.url}\n\nOpen it now?"
+        ):
+            webbrowser.open(pr.url)
+
+    def _handle_submit_error(self, error: Exception):
+        self._set_editor_locked(False)
+        self._update_pr_ui()
+        messagebox.showerror("Submit failed", str(error))
 
     def _handle_browse_error(self, error: Exception):
         self.status_label.config(text=self._default_status_text())
