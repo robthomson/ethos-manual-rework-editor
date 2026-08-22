@@ -17,6 +17,9 @@
  *   ported — not part of this slice.
  */
 import express from "express";
+import multer from "multer";
+import path from "path";
+import fs from "fs-extra";
 import { getTokenForUser } from "./authRoutes";
 import {
   listWorkspaces,
@@ -27,12 +30,16 @@ import {
   savePage,
   scanChanges,
   createNewPage,
+  listWorkspaceImages,
+  uploadImage,
+  workspaceImageFilePath,
   WorkspaceError,
 } from "../workspaceStore";
 import { fetchMkdocsConfig, localeNames } from "../mkdocsConfig";
 import type { GitHubToken } from "../githubClient";
 
 const router = express.Router();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 function tokenForRequest(req: express.Request): GitHubToken | null {
   const login = req.session?.login;
@@ -134,6 +141,49 @@ router.post("/:name/new-page", async (req, res) => {
     const token = tokenForRequest(req);
     const result = await createNewPage(token, req.params.name, title, slug, sectionTitle);
     res.json(result);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// Images live in one shared assets/ folder per locale (see
+// workspaceStore.ts's own comment on why, vs. docEditor's per-page
+// img/ convention) — these three routes list/upload/serve within it.
+
+router.get("/:name/images", async (req, res) => {
+  try {
+    res.json({ images: await listWorkspaceImages(req.params.name) });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+router.post("/:name/images", upload.single("file"), async (req, res) => {
+  const filename = (req.body?.filename as string) || req.file?.originalname;
+  if (!req.file || !filename) {
+    return res.status(400).json({ error: "Missing file or filename." });
+  }
+
+  try {
+    const result = await uploadImage(req.params.name, filename, req.file.buffer);
+    res.json(result);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// Serves a workspace's locally-uploaded image back — needed so the live
+// preview (preview/renderMarkdown.tsx) can show an image that was just
+// uploaded this session and doesn't exist upstream on GitHub yet at all;
+// without this, a freshly-inserted image would show as broken until
+// it's actually committed (which isn't built yet — see gitRoutes.ts).
+router.get("/:name/images/:filename", async (req, res) => {
+  try {
+    const filePath = await workspaceImageFilePath(req.params.name, req.params.filename);
+    if (!(await fs.pathExists(filePath))) {
+      return res.status(404).json({ error: "Image not found in this workspace." });
+    }
+    res.sendFile(path.resolve(filePath));
   } catch (err) {
     handleError(res, err);
   }

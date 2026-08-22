@@ -29,9 +29,16 @@
  *   PageView.tsx uses) renders the *current in-progress content* — not
  *   the last-saved version — so flipping to Preview always reflects
  *   whatever's been typed so far, saved or not.
+ *
+ *   "Insert image" captures the textarea's cursor position (selectionStart)
+ *   BEFORE the modal opens — opening it moves focus away from the
+ *   textarea, and reading selectionStart afterward would just see
+ *   wherever focus last was instead of where the user actually clicked.
  */
 import { useEffect, useRef, useState } from "react";
 import { MarkdownPreview } from "../preview/renderMarkdown";
+import { AddImageModal } from "./AddImageModal";
+import { relativeAssetPath } from "../utils/relativePath";
 
 interface EditablePageData {
   content: string;
@@ -80,6 +87,8 @@ export function EditablePageView({
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState<PaneMode>("source");
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [existingImageNames, setExistingImageNames] = useState<string[]>([]);
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Guards against saving stale content from a page that's since been
@@ -87,6 +96,10 @@ export function EditablePageView({
   // still fire and save into page B just because this component instance
   // is being reused across the mdPath change.
   const currentKeyRef = useRef<string>("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Captured when "Insert image" is clicked, before the modal (which
+  // steals focus) opens — see this file's header comment.
+  const insertCursorRef = useRef<number>(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -172,6 +185,26 @@ export function EditablePageView({
     }, 1200);
   }
 
+  async function openImageModal() {
+    insertCursorRef.current = textareaRef.current?.selectionStart ?? content.length;
+    try {
+      const res = await fetch(`/api/workspace/${encodeURIComponent(workspace)}/images`);
+      const data: { images?: string[] } = await res.json();
+      setExistingImageNames(data.images || []);
+    } catch {
+      setExistingImageNames([]);
+    }
+    setShowImageModal(true);
+  }
+
+  function handleImageUploaded(filename: string) {
+    const ref = relativeAssetPath(mdPath, `assets/${filename}`);
+    const markdown = `![${filename.replace(/\.[a-z0-9]+$/i, "")}](${ref})`;
+    const offset = insertCursorRef.current;
+    const next = content.slice(0, offset) + markdown + content.slice(offset);
+    handleChange(next);
+  }
+
   if (loading) return <div className="page-view-loading">Loading {title}…</div>;
   if (loadError) return <div className="page-view-error">{loadError}</div>;
 
@@ -195,15 +228,39 @@ export function EditablePageView({
             {localeName} (editing)
             <PaneModeToggle mode={editMode} onChange={setEditMode} />
           </div>
+          {editMode === "source" && (
+            <div className="editor-toolbar">
+              <button onClick={openImageModal}>Insert image</button>
+            </div>
+          )}
           {editMode === "source" ? (
-            <textarea value={content} onChange={(e) => handleChange(e.target.value)} />
+            <textarea
+              ref={textareaRef}
+              value={content}
+              onChange={(e) => handleChange(e.target.value)}
+            />
           ) : (
             <div className="preview-scroll">
-              <MarkdownPreview content={content} branch={branch} locale={locale} mdPath={mdPath} />
+              <MarkdownPreview
+                content={content}
+                branch={branch}
+                locale={locale}
+                mdPath={mdPath}
+                workspace={workspace}
+              />
             </div>
           )}
         </div>
       </div>
+
+      {showImageModal && (
+        <AddImageModal
+          workspace={workspace}
+          existingNames={existingImageNames}
+          onClose={() => setShowImageModal(false)}
+          onUploaded={handleImageUploaded}
+        />
+      )}
     </div>
   );
 }

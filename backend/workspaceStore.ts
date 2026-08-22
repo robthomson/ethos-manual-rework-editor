@@ -272,6 +272,68 @@ function findSectionChildren(nav: any[], sectionTitle: string): any[] | null {
   return null;
 }
 
+const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|svg|webp)$/i;
+
+// ethos-manual-rework's real convention (confirmed against live pages —
+// `![Glasses](../assets/model-glasses.png)` resolves to
+// docs/en/assets/model-glasses.png): one shared assets/ folder per
+// locale, not a per-page img/ folder next to each doc the way
+// docEditor's own AddImageModal.tsx assumes. Every upload lands here.
+function assetsDir(root: string, locale: string): string {
+  return path.join(root, "docs", locale, "assets");
+}
+
+export async function listWorkspaceImages(name: string): Promise<string[]> {
+  const meta = await readMeta(name);
+  const dir = assetsDir(workspaceRoot(name), meta.locale);
+  if (!(await fs.pathExists(dir))) return [];
+  const entries = await fs.readdir(dir);
+  return entries.filter((n) => IMAGE_EXTENSIONS.test(n));
+}
+
+// For workspaceRoutes.ts's serve-image route — keeps the docs/<locale>/
+// assets/ path convention defined in exactly one place.
+export async function workspaceImageFilePath(name: string, filename: string): Promise<string> {
+  if (!isSafePathSegment(filename)) throw new WorkspaceError(`Invalid image filename "${filename}".`);
+  const meta = await readMeta(name);
+  return path.join(assetsDir(workspaceRoot(name), meta.locale), filename);
+}
+
+export interface UploadedImage {
+  filename: string;
+  relPath: string; // relative to docs/<locale>/ — "assets/<filename>"
+}
+
+// Deliberately does not diff against a baseline the way page edits do
+// (see scanChanges() below) — this app never lazily materializes an
+// existing upstream image the way it does a page, so any image file
+// present in a workspace only ever got there via this function, in
+// this session. That means a re-upload replacing an existing upstream
+// screenshot under the same filename shows as "added" rather than the
+// more precise "modified" — a known, deliberate scope cut (the
+// alternative needs fetching and diffing the original binary from
+// GitHub first); the practical effect on what gets committed is the
+// same either way.
+export async function uploadImage(
+  name: string,
+  filename: string,
+  data: Buffer,
+): Promise<UploadedImage> {
+  if (!isSafePathSegment(filename)) {
+    throw new WorkspaceError(`Invalid image filename "${filename}".`);
+  }
+  if (!IMAGE_EXTENSIONS.test(filename)) {
+    throw new WorkspaceError("Only .png, .jpg, .jpeg, .gif, .svg, or .webp images are supported.");
+  }
+
+  const meta = await readMeta(name);
+  const dir = assetsDir(workspaceRoot(name), meta.locale);
+  await fs.ensureDir(dir);
+  await fs.writeFile(path.join(dir, filename), data);
+
+  return { filename, relPath: `assets/${filename}` };
+}
+
 export interface NewPageResult {
   mdPath: string;
 }
@@ -396,6 +458,15 @@ export async function scanChanges(name: string): Promise<ChangeEntry[]> {
         await walk(full, relPath);
         continue;
       }
+      if (IMAGE_EXTENSIONS.test(entry.name)) {
+        // No baseline concept for images (see uploadImage()'s own
+        // comment) — every image present only ever got there via a
+        // real upload in this session, so it's unconditionally a
+        // pending change.
+        changes.push({ path: relPath, type: "added" });
+        continue;
+      }
+
       if (!entry.name.endsWith(".md")) continue;
 
       const baseline = baselinePath(root, meta.locale, relPath);

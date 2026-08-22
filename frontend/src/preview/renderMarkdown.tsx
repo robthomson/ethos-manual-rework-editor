@@ -41,6 +41,15 @@
  *   backend/routes/navRoutes.ts's own translated/missing status already
  *   uses), and substituting the locale segment for "en" only when the
  *   locale-specific file genuinely doesn't exist.
+ *
+ *   A freshly-uploaded image (AddImageModal.tsx) is a third case on top
+ *   of that: it doesn't exist upstream on GitHub *at all* yet (nothing's
+ *   been committed — see gitRoutes.ts, not yet built), so neither the
+ *   locale path nor the English-fallback path would ever resolve there.
+ *   Checked first, before the upstream-tree logic: if the image's
+ *   filename is one this workspace uploaded itself, it's served locally
+ *   via backend/routes/workspaceRoutes.ts's own image-serving route
+ *   instead of a raw.githubusercontent.com URL.
  */
 import { useEffect, useState } from "react";
 import * as React from "react";
@@ -72,7 +81,14 @@ function resolveRepoRelativePath(baseDir: string, ref: string): string {
   return resolved.pathname.replace(/^\//, "");
 }
 
-function rehypeRewriteImages(branch: string, locale: string, mdPath: string, existingPaths: Set<string>) {
+function rehypeRewriteImages(
+  branch: string,
+  locale: string,
+  mdPath: string,
+  existingPaths: Set<string>,
+  workspace: string | null,
+  workspaceImages: Set<string>,
+) {
   const mdDir = mdPath.includes("/") ? mdPath.slice(0, mdPath.lastIndexOf("/")) : "";
   const localeBaseDir = `docs/${locale}/${mdDir}`;
 
@@ -84,6 +100,16 @@ function rehypeRewriteImages(branch: string, locale: string, mdPath: string, exi
 
       try {
         const localePath = resolveRepoRelativePath(localeBaseDir, src);
+        const filename = localePath.split("/").pop() ?? "";
+
+        // Uploaded this session, not committed upstream anywhere yet —
+        // check before the upstream-tree logic below, which would never
+        // find it either way.
+        if (workspace && workspaceImages.has(filename)) {
+          node.properties.src = `/api/workspace/${encodeURIComponent(workspace)}/images/${encodeURIComponent(filename)}`;
+          return;
+        }
+
         // existingPaths is only ever empty for locale === "en" itself
         // (see MarkdownPreview below — no fallback needed, or possible,
         // for English) or when the tree fetch failed; either way,
@@ -110,11 +136,13 @@ export interface RenderMarkdownOptions {
   locale: string;
   mdPath: string; // used only to resolve this page's own image references
   existingPaths: Set<string>; // see rehypeRewriteImages above
+  workspace?: string | null;
+  workspaceImages?: Set<string>;
 }
 
 export function renderMarkdown(
   content: string,
-  { branch, locale, mdPath, existingPaths }: RenderMarkdownOptions,
+  { branch, locale, mdPath, existingPaths, workspace = null, workspaceImages = new Set() }: RenderMarkdownOptions,
 ): React.ReactNode {
   const { text, markers } = preprocessPymdownxBlocks(content);
 
@@ -125,7 +153,7 @@ export function renderMarkdown(
     .use(remarkPymdownxBlocks, markers)
     .use(remarkRehype)
     .use(rehypeSlug)
-    .use(rehypeRewriteImages(branch, locale, mdPath, existingPaths))
+    .use(rehypeRewriteImages(branch, locale, mdPath, existingPaths, workspace, workspaceImages))
     .use(rehypeReact, {
       Fragment: jsxRuntime.Fragment,
       jsx: jsxRuntime.jsx,
@@ -141,6 +169,12 @@ interface MarkdownPreviewProps {
   branch: string;
   locale: string;
   mdPath: string;
+  // Set only from EditablePageView.tsx — lets an image uploaded this
+  // session (not committed upstream anywhere yet) resolve to a local
+  // serving route instead of a GitHub URL that wouldn't exist. Absent
+  // entirely for read-only browsing (PageView.tsx), where there's no
+  // workspace to check against.
+  workspace?: string;
 }
 
 // Debounced to a short pause in typing rather than every keystroke —
@@ -149,7 +183,7 @@ interface MarkdownPreviewProps {
 // shorter than that file's 3000ms without janking the UI.
 const RENDER_DEBOUNCE_MS = 300;
 
-export function MarkdownPreview({ content, branch, locale, mdPath }: MarkdownPreviewProps) {
+export function MarkdownPreview({ content, branch, locale, mdPath, workspace }: MarkdownPreviewProps) {
   const [node, setNode] = useState<React.ReactNode>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -161,9 +195,17 @@ export function MarkdownPreview({ content, branch, locale, mdPath }: MarkdownPre
         // English has nothing to fall back to (it IS the default), so
         // skip the tree fetch entirely — matches navRoutes.ts's own
         // "toc" endpoint doing the same for the identical reason.
-        const existingPaths = locale === "en" ? new Set<string>() : await fetchRepoTree(branch);
+        const [existingPaths, workspaceImages] = await Promise.all([
+          locale === "en" ? new Set<string>() : fetchRepoTree(branch),
+          workspace
+            ? fetch(`/api/workspace/${encodeURIComponent(workspace)}/images`)
+                .then((res) => res.json())
+                .then((data: { images?: string[] }) => new Set(data.images || []))
+                .catch(() => new Set<string>())
+            : Promise.resolve(new Set<string>()),
+        ]);
         if (cancelled) return;
-        setNode(renderMarkdown(content, { branch, locale, mdPath, existingPaths }));
+        setNode(renderMarkdown(content, { branch, locale, mdPath, existingPaths, workspace, workspaceImages }));
         setError(null);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -174,7 +216,7 @@ export function MarkdownPreview({ content, branch, locale, mdPath }: MarkdownPre
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [content, branch, locale, mdPath]);
+  }, [content, branch, locale, mdPath, workspace]);
 
   if (error) {
     return (

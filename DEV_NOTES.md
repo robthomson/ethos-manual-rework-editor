@@ -11,19 +11,48 @@ Electron + React/TypeScript + Express), pulling architecture ideas from
 repo:**
 - Sign-in via GitHub OAuth device flow (a registered GitHub App —
   `ethos-manual-editor`, App ID 4686312, owned by `@robthomson`; Client ID
-  in `backend/.env`, gitignored, not committed).
+  in `backend/.env`, gitignored, not committed). Sessions live in
+  in-memory `MemoryStore` and don't survive a backend restart on their
+  own, but `authRoutes.ts`'s `/session` auto-adopts the sole stored token
+  on disk when no session exists — right for a single-user desktop
+  install (see that file's own comment), so a restart never actually
+  forces a fresh device-flow login.
 - Anonymous-capable nav browsing: branches, locales, the nav tree annotated
   with translated/missing status, per-page English + translation +
   staleness (`translated_from:` vs. the English page's current commit SHA).
+  Structural GitHub lookups (mkdocs.yml, the repo tree, branch list,
+  commit SHAs) are cached (`backend/githubCache.ts`, 5 min TTL) — without
+  this, clicking around re-hit GitHub's live API on every click.
 - Local workspace editing, no sign-in required for this part (see
   `backend/workspaceStore.ts`'s header comment for why): create a
   workspace (branch + locale), open a page (lazily materialized from
   GitHub on first open, then pure local disk I/O), edit with autosave,
-  see a real added/modified change list.
-- **New page creation** (English-only — see below): writes the page file
-  under `docs/en/` and inserts the nav entry into a local working copy of
-  `mkdocs.yml`. Both tracked in the workspace's change list. Verified
-  against the real repo's actual nav structure.
+  see a real added/modified change list (diffed against a per-page
+  `.baseline/` snapshot, not mere file existence, so opening a page you
+  never edit is never itself a "change").
+- **New page creation** (English-only): writes the page file under
+  `docs/en/` and inserts the nav entry into a local working copy of
+  `mkdocs.yml`. Both tracked in the workspace's change list.
+- **Live rendered preview** (`frontend/src/preview/`): a real remark/
+  rehype pipeline for `ethos-manual-rework`'s actual pymdownx syntax
+  (`!!!`/`???`/`???+` admonitions & details, `=== "Tab"` tabbed content),
+  GFM tables, attr_list-noise stripping, heading anchors. Each pane
+  (English/translation/editing) gets an independent Source/Preview
+  toggle. This is what "WYSIWYG" pragmatically means here — source +
+  real preview, not contentEditable rich text (see "Open questions"
+  below, this was asked again and re-confirmed mid-session).
+- **Image handling**: relative image `src`s resolve to real
+  raw.githubusercontent.com URLs, replicating `mkdocs.yml`'s actual
+  `i18n: fallback_to_default: true` config — a locale-specific screenshot
+  that doesn't exist falls back to the English one at the same path,
+  exactly like the real site's build does (caught live: a translated
+  page's screenshots showed as broken images before this was fixed).
+  Upload (browse/drag/paste, matching docEditor's `AddImageModal.tsx`
+  pattern) goes into the workspace's shared `docs/<locale>/assets/`
+  folder (confirmed real convention — NOT a per-page `img/` folder the
+  way docEditor assumes) and inserts a reference at the textarea cursor;
+  a freshly-uploaded image (nothing committed upstream yet) resolves to
+  a local serving route instead of a GitHub URL.
 - `make dev` boots backend + Vite + a real Electron window together
   (originally didn't — docEditor's own `dev` script doesn't either; you're
   expected to open a plain browser tab. Fixed here since a desktop app
@@ -36,11 +65,15 @@ repo:**
   registered — that's a separate step (Install App button on the app's
   settings page).
 - Spellcheck-in-editor.
-- Structural insert helpers (admonitions/tables/tabs — pymdownx syntax:
-  `!!! note "Title"`, `=== "Tab"`, not Docusaurus's `:::`/JSX).
+- Structural insert helpers as UI (the preview *renders* admonitions/
+  tables/tabs correctly now, but there's no toolbar button to insert one
+  without hand-typing the pymdownx syntax yet).
 - The diff-vs-English view.
-- Live rendered preview (in progress as of this commit — see below).
-- Image upload/insertion (in progress as of this commit — see below).
+- **Not machine-verified**: the actual browse/drag/paste interaction in
+  the image-upload modal. Everything behind it (upload/list/serve
+  endpoints, byte-identical round trip, change tracking) was tested
+  directly against the API; the mouse/file-drop interaction itself needs
+  a human — try it and see.
 
 ## Key architecture decisions (and why)
 
@@ -54,27 +87,32 @@ Short version:
    Python app) is untouched and still works — retire it only once this
    reaches parity.
 2. **Auth**: GitHub OAuth device flow via a registered GitHub App, with
-   per-user forks (not today's pasted-PAT direct-write model). Chosen
-   over keeping the simpler PAT model because [context from that
-   conversation: the user wanted the nicer login UX and was willing to
-   register a GitHub App].
+   per-user forks (not today's pasted-PAT direct-write model) — chosen
+   for the nicer login UX, at the cost of needing the App registered
+   (done) and installed per account (separate step, needed once the
+   commit/PR flow exists).
 3. **Local workspace editing, not stateless single-page Data-API calls**:
    a workspace = one branch + one locale. Pages materialize *lazily* (only
    what's actually opened gets fetched from GitHub, once), **not** a full
-   `git clone` — see "Why not a real git checkout?" below, that question
-   came up directly and here's the answer that was given.
+   `git clone` — see "Why not a real git checkout?" below.
 4. **Preview engine**: a custom remark/rehype pipeline for pymdownx's real
    syntax (`ethos-manual-rework` is mkdocs + pymdownx, not
    MDX/Docusaurus like docEditor's own target repo) — chosen over reusing
    Python-Markdown via a bundled subprocess, to keep this a pure Node/
-   Electron app with no Python runtime dependency. **This is the piece
-   this commit starts building** (see below).
+   Electron app with no Python runtime dependency. Only the extensions
+   actually listed in the real `mkdocs.yml` are implemented (admonition,
+   attr_list, pymdownx.details, pymdownx.superfences, pymdownx.tabbed,
+   tables, toc:permalink) — verified against the live file, not guessed.
 5. **New-page creation is English-only.** Every other locale only ever
    translates pages that already exist in the nav (which is itself always
    English-derived structure) — never invents its own. Enforced both in
    the UI (the "+ New Page" action only appears in an English workspace)
-   and server-side in `workspaceStore.ts:createNewPage()` (so it can't be
-   reached any other way even if a future caller forgets the check).
+   and server-side in `workspaceStore.ts:createNewPage()`.
+6. **Images live in one shared `assets/` folder per locale**
+   (`docs/<locale>/assets/`), confirmed against real pages (e.g.
+   `![Glasses](../assets/model-glasses.png)`) — not docEditor's own
+   per-page `img/` folder convention. Upload/insert code follows this
+   repo's real layout, not the sibling project's.
 
 ### Why not a real `git clone`? (came up directly, worth keeping the answer)
 
@@ -90,15 +128,16 @@ Two real reasons, from the original Python tool's own stated rationale:
    partial clone) — doable, meaningfully more engineering than a plain
    clone.
 
-Decided **not** to build this: the two real rate-limit hits during dev
-weren't from browsing being inherently too chatty (`fetchMkdocsConfig`/
-`fetchRepoTree` are cached — see `backend/githubCache.ts` — and edited
-pages are already local after first open). Most of the damage was
-**restarting the dev server repeatedly during testing**, which wipes the
-in-memory cache each time. Signing in raises the limit from 60→5000/hour,
-which comfortably covers a single translator's real usage regardless of
-caching. Revisit a real (sparse) checkout only if offline editing is
-ever a real requirement — that's the one thing sign-in doesn't buy you.
+Decided **not** to build this: the real rate-limit hits during dev
+weren't from browsing being inherently too chatty (structural lookups are
+cached — see `githubCache.ts` — and edited pages are already local after
+first open). Most of the damage was **restarting the dev server
+repeatedly during testing**, which used to wipe the in-memory session too
+(now fixed — see auto-adopt-sole-token above). Signing in raises the
+limit from 60→5000/hour, comfortably covering a single translator's real
+usage regardless of caching. Revisit a real (sparse) checkout only if
+offline editing is ever a real requirement — that's the one thing
+sign-in doesn't buy you.
 
 ## Known trade-offs / rough edges to revisit
 
@@ -109,10 +148,35 @@ ever a real requirement — that's the one thing sign-in doesn't buy you.
   this will show much more churn in `mkdocs.yml` than the actual change.
   Fix would be a line-based/text-surgery insertion instead of parse+dump —
   meaningfully more engineering, deliberately deferred.
-- **GitHub rate limit**: signing in fixes this for real usage (5000/hour),
-  but a *dev loop* that restarts the backend often will still burn through
-  the anonymous 60/hour fast if testing while signed out. Sign in during
-  dev testing.
+- **Preview fidelity, deliberate cuts** (same "behavior over pixel
+  parity" spirit as the old `preview.py`):
+  - `remark-gfm` also enables strikethrough/autolink/tasklist, which
+    aren't actually in `mkdocs.yml`'s extension list — minor overreach,
+    those render here but wouldn't on the real site.
+  - `pymdownx.superfences`' advanced features (nested/tabbed code
+    blocks) aren't attempted; plain fenced code (`` ```lang ``) covers
+    the common case.
+  - `attr_list` syntax (`{: .class}`) is stripped, not actually applied —
+    real semantics need real per-block-type placement rules.
+  - A pymdownx block (admonition/details/tabs) nested inside a list item
+    works (verified against real content —
+    `docs/nl/system-setup/general.md`); a block nested inside *another*
+    block does not (no confirmed real usage of that case, unlike the
+    list-item one, which an earlier assumption got wrong by checking too
+    few files first).
+- **Image change-tracking is approximate.** Uploaded images are never
+  diffed against a baseline the way page text is (see
+  `workspaceStore.ts:uploadImage()`'s own comment) — every image in a
+  workspace is unconditionally "added" in the changes list, even a
+  re-upload that's actually *replacing* an existing upstream screenshot
+  under the same filename (which is really a "modified"). The practical
+  effect on what eventually gets committed is the same either way; only
+  the changes-list label is imprecise.
+- **GitHub rate limit**: signing in fixes this for real usage (5000/hour);
+  a *dev loop* that restarts the backend often while signed out can still
+  burn through the anonymous 60/hour fast (session auto-restore now
+  covers the "signed out because of a restart" case, but doesn't help if
+  you were never signed in to begin with).
 - **No offline support.** Every unmaterialized page/section list still
   needs a live GitHub call the first time. Fine for the target use case
   (a translator with a normal internet connection); would need the
@@ -137,22 +201,14 @@ ever a real requirement — that's the one thing sign-in doesn't buy you.
 
 ## Open questions for next session
 
-- **"WYSIWYG editor"** was asked for again after already being scoped
-  *out* in favor of source + live-preview (an actual contentEditable
-  rich-text editor is a much bigger, riskier build, and neither this app
-  nor docEditor has one). Proceeding on the assumption that "live
-  rendered preview" (already in the plan, just not built yet) is what's
-  wanted — **confirm this**, since true click-to-format rich text editing
-  is a materially different, larger undertaking if that's actually the
-  ask.
-- Image upload/selection: building the paste/drag/browse upload flow
-  (matching docEditor's `AddImageModal.tsx` pattern) plus inserting a
-  reference into the edited markdown at the cursor. Scope for this pass:
-  upload into the workspace's local `img/` folder next to the page being
-  edited; committing new images upstream is still blocked on the
-  commit/PR flow not being built yet (same as page text).
-- "Create new page" was flagged as a want, but it already exists
-  (English-only, see above) — worth confirming this actually is what was
-  wanted, or if something more is expected of it (e.g. available for
-  every locale, which would contradict the "translations always follow
-  English" decision above — flag if that's actually wanted).
+- **Try the image-upload modal for real** (browse/drag/paste) — the one
+  piece of this session's work that couldn't be machine-verified; see
+  "Not built yet" above.
+- **"WYSIWYG editor"** — confirmed mid-session that "live rendered
+  preview" (now built) is the right read of this, not actual
+  contentEditable rich-text editing. Revisit only if that's genuinely
+  still wanted — it's a materially bigger, different undertaking.
+- Structural insert helpers (a toolbar to insert an admonition/table/tab
+  without hand-typing pymdownx syntax) are still just "the preview
+  renders them correctly," not an actual insert UI — worth confirming
+  this is still wanted as a next step, per the original plan.

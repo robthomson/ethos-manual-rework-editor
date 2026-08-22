@@ -611,3 +611,46 @@
   gap: 0.5rem;
   margin-top: 1rem;
 }
+
+.add-image-dropzone {
+  border: 2px dashed #ccc;
+  border-radius: 6px;
+  padding: 1.5rem;
+  text-align: center;
+  cursor: pointer;
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.add-image-dropzone.drag-over {
+  border-color: #0969da;
+  background: #f0f7ff;
+}
+
+.add-image-dropzone-hint {
+  color: #666;
+  font-size: 0.85rem;
+}
+
+.add-image-preview {
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: 4px;
+}
+
+.editor-toolbar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.editor-toolbar button {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: white;
+  cursor: pointer;
+}
