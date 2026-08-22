@@ -1,21 +1,20 @@
 /* frontend/src/components/PageView.tsx
  *
  * Description of responsibility:
- *   Fetches and displays one selected page: English source (left,
- *   always read-only) and the target locale's translation (right) —
- *   read-only for now too, since actual editing needs the local
- *   workspace/save routes, not yet ported (see the approved plan).
- *   This is purely a "browse and verify the nav pipeline shows real
- *   content" step ahead of that.
+ *   Fetches and displays one selected page: English source (left) and
+ *   the target locale's translation (right) — both read-only here
+ *   (real editing is EditablePageView.tsx's job, once a workspace is
+ *   active). Each side can be toggled between raw source and the real
+ *   rendered preview (preview/renderMarkdown.tsx) independently.
  *
  * Info:
  *   Not translated yet (locale === "en" branch, or translation === null
  *   from a fresh fetch that hasn't landed) shows the English text on
- *   both sides — matches the eventual editor's own "pre-filled with
- *   English as a starting point" behavior for a missing translation,
- *   not left blank.
+ *   both sides — matches the editor's own "pre-filled with English as a
+ *   starting point" behavior for a missing translation, not left blank.
  */
 import { useEffect, useState } from "react";
+import { MarkdownPreview } from "../preview/renderMarkdown";
 
 interface PageData {
   source: string;
@@ -33,9 +32,26 @@ interface PageViewProps {
   title: string;
 }
 
+type PaneMode = "source" | "preview";
+
+function PaneModeToggle({ mode, onChange }: { mode: PaneMode; onChange: (m: PaneMode) => void }) {
+  return (
+    <div className="pane-mode-toggle">
+      <button className={mode === "source" ? "active" : ""} onClick={() => onChange("source")}>
+        Source
+      </button>
+      <button className={mode === "preview" ? "active" : ""} onClick={() => onChange("preview")}>
+        Preview
+      </button>
+    </div>
+  );
+}
+
 export function PageView({ branch, locale, localeName, mdPath, title }: PageViewProps) {
   const [data, setData] = useState<PageData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [englishMode, setEnglishMode] = useState<PaneMode>("source");
+  const [translationMode, setTranslationMode] = useState<PaneMode>("source");
 
   useEffect(() => {
     let cancelled = false;
@@ -72,6 +88,7 @@ export function PageView({ branch, locale, localeName, mdPath, title }: PageView
   }
 
   const isEnglish = locale === "en";
+  const translationContent = data.translation ?? data.source;
 
   return (
     <div className="page-view">
@@ -87,16 +104,32 @@ export function PageView({ branch, locale, localeName, mdPath, title }: PageView
 
       <div className="page-view-panes">
         <div className="page-view-pane">
-          <div className="page-view-pane-label">English (source)</div>
-          <textarea readOnly value={data.source} />
+          <div className="page-view-pane-label">
+            English (source)
+            <PaneModeToggle mode={englishMode} onChange={setEnglishMode} />
+          </div>
+          {englishMode === "source" ? (
+            <textarea readOnly value={data.source} />
+          ) : (
+            <div className="preview-scroll">
+              <MarkdownPreview content={data.source} branch={branch} locale="en" mdPath={mdPath} />
+            </div>
+          )}
         </div>
         {!isEnglish && (
           <div className="page-view-pane">
             <div className="page-view-pane-label">
               {localeName}
-              {data.translation === data.source ? " (not translated yet — showing English)" : ""}
+              {translationContent === data.source ? " (not translated yet — showing English)" : ""}
+              <PaneModeToggle mode={translationMode} onChange={setTranslationMode} />
             </div>
-            <textarea readOnly value={data.translation ?? data.source} />
+            {translationMode === "source" ? (
+              <textarea readOnly value={translationContent} />
+            ) : (
+              <div className="preview-scroll">
+                <MarkdownPreview content={translationContent} branch={branch} locale={locale} mdPath={mdPath} />
+              </div>
+            )}
           </div>
         )}
       </div>

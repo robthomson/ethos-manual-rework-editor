@@ -111,6 +111,28 @@ router.get("/toc", async (req, res) => {
   }
 });
 
+// Every real file path in the repo at this branch — reuses the exact
+// same cached fetchRepoTree() call /toc's own status annotation already
+// makes (one GitHub call per branch per 5 minutes, see githubCache.ts),
+// so this costs nothing extra in the common case. Exposed so the
+// frontend's own image-src resolution (preview/renderMarkdown.tsx) can
+// replicate mkdocs.yml's real `fallback_to_default: true` i18n
+// behavior: a locale-specific asset that doesn't exist falls back to
+// the English one at the same relative path, exactly like the real
+// site does at build time — without this, a translated page's own
+// screenshots (rarely re-shot per locale) would just show as broken
+// images instead of correctly falling back.
+router.get("/tree", async (req, res) => {
+  const branch = (req.query.branch as string) || "main";
+  try {
+    const token = tokenForRequest(req);
+    const paths = await fetchRepoTree(token, branch);
+    res.json({ paths: Array.from(paths) });
+  } catch (err) {
+    handleRepoError(res, err);
+  }
+});
+
 router.get("/page", async (req, res) => {
   const branch = (req.query.branch as string) || "main";
   const locale = (req.query.locale as string) || "en";

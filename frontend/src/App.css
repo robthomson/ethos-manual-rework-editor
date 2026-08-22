@@ -226,10 +226,156 @@
 }
 
 .page-view-pane-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   font-size: 0.8rem;
   color: #555;
   margin-bottom: 0.3rem;
   flex-shrink: 0;
+}
+
+.pane-mode-toggle {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.pane-mode-toggle button {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid #ccc;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #444;
+}
+
+.pane-mode-toggle button.active {
+  background: #24292f;
+  color: white;
+  border-color: #24292f;
+}
+
+.preview-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: white;
+  padding: 0.75rem 1rem;
+}
+
+.preview-error {
+  color: #cf222e;
+  font-size: 0.85rem;
+  padding: 1rem;
+}
+
+/* Rendered preview typography + pymdownx block styles — same spirit as
+   preview.py's own embedded stylesheet: legible, not a pixel-identical
+   copy of the live mkdocs-material theme. */
+.rendered-preview {
+  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: #1a1a1a;
+}
+
+.rendered-preview img {
+  max-width: 100%;
+}
+
+.rendered-preview pre {
+  background: #f4f4f4;
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
+.rendered-preview code {
+  font-family: "SF Mono", Consolas, monospace;
+  background: #f4f4f4;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+}
+
+.rendered-preview pre code {
+  background: none;
+  padding: 0;
+}
+
+.rendered-preview table {
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+}
+
+.rendered-preview th,
+.rendered-preview td {
+  border: 1px solid #ddd;
+  padding: 0.35rem 0.6rem;
+}
+
+.rendered-preview .admonition {
+  border-left: 4px solid #448aff;
+  background: #f4f8ff;
+  padding: 0.6rem 0.9rem;
+  margin: 0.9rem 0;
+  border-radius: 2px;
+}
+
+.rendered-preview .admonition-title {
+  font-weight: 700;
+  margin: 0 0 0.3rem 0;
+}
+
+.rendered-preview .admonition.warning,
+.rendered-preview .admonition.caution {
+  border-left-color: #ff9100;
+  background: #fff8f0;
+}
+
+.rendered-preview .admonition.danger {
+  border-left-color: #ff5252;
+  background: #fff2f2;
+}
+
+.rendered-preview .admonition.tip {
+  border-left-color: #1a7f37;
+  background: #f0fff4;
+}
+
+.rendered-preview details {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 0.5rem 0.9rem;
+  margin: 0.9rem 0;
+}
+
+.rendered-preview details summary {
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.rendered-preview .tabbed-set {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  margin: 0.9rem 0;
+}
+
+.rendered-preview .tabbed-block {
+  padding: 0.6rem 0.9rem;
+}
+
+.rendered-preview .tabbed-block + .tabbed-block {
+  border-top: 1px solid #ddd;
+}
+
+.rendered-preview .tabbed-label {
+  font-weight: 700;
+  font-size: 0.85rem;
+  margin-bottom: 0.3rem;
+  color: #444;
 }
 
 .save-indicator {

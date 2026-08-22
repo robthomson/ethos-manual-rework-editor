@@ -252,6 +252,7 @@ export default function App() {
                 key={`${activeWorkspace!.name}:${selectedPage.mdPath}`}
                 workspace={activeWorkspace!.name}
                 branch={activeWorkspace!.branch}
+                locale={locale}
                 localeName={locales[locale] || locale}
                 mdPath={selectedPage.mdPath}
                 title={selectedPage.title}

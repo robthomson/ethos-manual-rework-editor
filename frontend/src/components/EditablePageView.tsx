@@ -24,8 +24,14 @@
  *   of docEditor's own useAutosave hook, just inlined here rather than
  *   factored out yet — worth revisiting once more editor surfaces need
  *   the same pattern.
+ *
+ *   The editing pane's own Source/Preview toggle (same component
+ *   PageView.tsx uses) renders the *current in-progress content* — not
+ *   the last-saved version — so flipping to Preview always reflects
+ *   whatever's been typed so far, saved or not.
  */
 import { useEffect, useRef, useState } from "react";
+import { MarkdownPreview } from "../preview/renderMarkdown";
 
 interface EditablePageData {
   content: string;
@@ -33,9 +39,25 @@ interface EditablePageData {
   error?: string;
 }
 
+type PaneMode = "source" | "preview";
+
+function PaneModeToggle({ mode, onChange }: { mode: PaneMode; onChange: (m: PaneMode) => void }) {
+  return (
+    <div className="pane-mode-toggle">
+      <button className={mode === "source" ? "active" : ""} onClick={() => onChange("source")}>
+        Edit
+      </button>
+      <button className={mode === "preview" ? "active" : ""} onClick={() => onChange("preview")}>
+        Preview
+      </button>
+    </div>
+  );
+}
+
 interface EditablePageViewProps {
   workspace: string;
   branch: string;
+  locale: string;
   localeName: string;
   mdPath: string;
   title: string;
@@ -45,6 +67,7 @@ interface EditablePageViewProps {
 export function EditablePageView({
   workspace,
   branch,
+  locale,
   localeName,
   mdPath,
   title,
@@ -56,6 +79,7 @@ export function EditablePageView({
   const [loading, setLoading] = useState(true);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [editMode, setEditMode] = useState<PaneMode>("source");
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Guards against saving stale content from a page that's since been
@@ -167,8 +191,17 @@ export function EditablePageView({
           <textarea readOnly value={englishSource ?? ""} />
         </div>
         <div className="page-view-pane">
-          <div className="page-view-pane-label">{localeName} (editing)</div>
-          <textarea value={content} onChange={(e) => handleChange(e.target.value)} />
+          <div className="page-view-pane-label">
+            {localeName} (editing)
+            <PaneModeToggle mode={editMode} onChange={setEditMode} />
+          </div>
+          {editMode === "source" ? (
+            <textarea value={content} onChange={(e) => handleChange(e.target.value)} />
+          ) : (
+            <div className="preview-scroll">
+              <MarkdownPreview content={content} branch={branch} locale={locale} mdPath={mdPath} />
+            </div>
+          )}
         </div>
       </div>
     </div>

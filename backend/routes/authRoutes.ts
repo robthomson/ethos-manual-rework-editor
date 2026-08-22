@@ -118,6 +118,27 @@ function loadToken(login: string): StoredToken | null {
   return null;
 }
 
+// Sessions live in MemoryStore (see server.ts's own comment on why —
+// nothing here needs to survive a restart in the general case), but
+// that means every backend restart orphans any already-issued session
+// cookie: the stored *token* file is still sitting on disk, perfectly
+// valid, with nothing left mapping a browser's cookie to it. For a
+// genuinely multi-tenant server that's the right failure mode (a
+// restart shouldn't silently hand out someone else's session) — but
+// this app is single-user per desktop install (see
+// workspaceStore.ts's own header comment for the same reasoning
+// applied to local workspaces), so requiring a full device-flow
+// re-login after every restart is pure friction with no real security
+// benefit. If exactly one valid token is stored, auto-adopt it as
+// "whoever's using this install" — ambiguous (zero, or more than one,
+// e.g. two different accounts tested on the same machine) still falls
+// back to a real login rather than guessing.
+function findSoleStoredUser(): StoredToken | null {
+  const files = fs.readdirSync(TOKENS_DIR).filter((name) => name.endsWith(".json"));
+  if (files.length !== 1) return null;
+  return readTokenFile(path.join(TOKENS_DIR, files[0]));
+}
+
 function saveToken(token: StoredToken) {
   const file = tokenPath(token.id);
   fs.writeFileSync(file, JSON.stringify(token, null, 2), "utf8");
@@ -263,7 +284,21 @@ router.post("/device/poll", async (req, res) => {
 // username); it can only ask "who does my own session cookie belong to?".
 // ---------------------------------------------
 router.get("/session", (req, res) => {
-  const login = req.session.login;
+  let login = req.session.login;
+
+  // No session yet for this cookie (fresh browser session, or the
+  // backend restarted and wiped MemoryStore since it was issued) — see
+  // findSoleStoredUser()'s own comment for why auto-adopting a single
+  // stored token is the right call for a single-user desktop install.
+  if (!login) {
+    const sole = findSoleStoredUser();
+    if (sole) {
+      login = sole.login;
+      req.session.login = login;
+      req.session.userId = sole.id;
+    }
+  }
+
   const authenticated = !!login && !!loadToken(login);
 
   if (!authenticated) {
