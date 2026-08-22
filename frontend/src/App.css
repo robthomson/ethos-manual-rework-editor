@@ -1,0 +1,467 @@
+.app-shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-topbar {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.6rem 1rem;
+  background: #24292f;
+  color: white;
+  flex-shrink: 0;
+}
+
+.app-title {
+  font-size: 1rem;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.app-topbar-controls {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.85rem;
+}
+
+.app-topbar-controls label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.app-topbar-controls select {
+  font-size: 0.85rem;
+  padding: 0.15rem 0.3rem;
+  border-radius: 4px;
+  border: none;
+}
+
+.app-topbar-auth {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.app-topbar-auth a {
+  color: #79c0ff;
+}
+
+.app-topbar-auth button {
+  background: white;
+  border: none;
+  border-radius: 4px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.auth-error-inline {
+  color: #ff9b9b;
+}
+
+.app-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.app-sidebar {
+  width: 320px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-right: 1px solid #ddd;
+  background: #fafbfc;
+  padding: 0.5rem;
+}
+
+.nav-loading,
+.nav-error {
+  padding: 1rem;
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.nav-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.85rem;
+}
+
+.nav-tree-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.25rem 0.4rem;
+  border-radius: 4px;
+}
+
+.nav-tree-row.clickable {
+  cursor: pointer;
+}
+
+.nav-tree-row.clickable:hover {
+  background: #eef1f4;
+}
+
+.nav-tree-row.active {
+  background: #dbeafe;
+  font-weight: 600;
+}
+
+.nav-status {
+  font-size: 0.75rem;
+  border-radius: 3px;
+  padding: 0 0.3rem;
+  flex-shrink: 0;
+}
+
+.nav-status-translated {
+  color: #1a7f37;
+}
+
+.nav-status-missing {
+  color: #cf222e;
+}
+
+.app-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  /* display:flex here is the actual fix — page-view-panes' flex:1 (and
+     everything under it) only does anything at all once its ancestor
+     chain is a real flex column all the way up. app-main was a plain
+     block before, so .page-view's own flex:1 (added alongside it below)
+     had no flex container to size against and was silently ignored —
+     the textareas stayed at their bare browser-default height even
+     though every rule *inside* page-view-panes was already correct.
+     overflow-y:auto moved off this element: the textareas own their own
+     scrolling now that they actually have a real height to scroll
+     within, and app-main scrolling too on top of that would just be a
+     second, redundant scrollbar around content that already fits. */
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+}
+
+.app-main-placeholder {
+  color: #888;
+  font-size: 0.9rem;
+  padding: 2rem;
+  text-align: center;
+}
+
+.page-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.page-view-loading,
+.page-view-error {
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.page-view-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  flex-shrink: 0;
+}
+
+.page-view-header h3 {
+  margin: 0;
+}
+
+.stale-badge {
+  background: #fff3cd;
+  color: #7a5c00;
+  border-radius: 4px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.fresh-badge {
+  background: #dafbe1;
+  color: #1a7f37;
+  border-radius: 4px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.page-view-panes {
+  display: flex;
+  gap: 1rem;
+  /* flex:1 (not a percentage height) so this actually fills whatever
+     vertical space app-main/page-view have available, however that
+     space itself ended up being computed — a percentage height here
+     needs every ancestor up the chain to have an explicit (non-auto)
+     height to resolve against, and page-view didn't, so it silently
+     fell back to "auto" and every textarea below just rendered at its
+     bare browser-default ~3-row height regardless of how much empty
+     page there was underneath it. min-height:0 overrides flexbox's
+     default "never shrink below content size" on a flex child — without
+     it, a tall textarea's intrinsic size would still force this row
+     (and everything above it) taller than the space actually available. */
+  flex: 1;
+  min-height: 0;
+}
+
+.page-view-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.page-view-pane-label {
+  font-size: 0.8rem;
+  color: #555;
+  margin-bottom: 0.3rem;
+  flex-shrink: 0;
+}
+
+.save-indicator {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.save-indicator.saved {
+  color: #1a7f37;
+}
+
+.save-indicator.error {
+  color: #cf222e;
+}
+
+.workspace-bar {
+  border-bottom: 1px solid #ddd;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.workspace-bar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 0.4rem;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  color: #0969da;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 0;
+}
+
+.workspace-new-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem 0.4rem;
+}
+
+.workspace-new-form input,
+.workspace-new-form select {
+  font-size: 0.85rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.workspace-new-form-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.workspace-new-form-branch {
+  font-size: 0.8rem;
+  color: #666;
+  background: #f0f0f0;
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  flex-shrink: 0;
+}
+
+.workspace-new-form-row select {
+  flex: 1;
+}
+
+.workspace-error {
+  color: #cf222e;
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+.workspace-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.workspace-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.25rem 0.4rem;
+  border-radius: 4px;
+  cursor: default;
+}
+
+.workspace-list li span {
+  cursor: pointer;
+  flex: 1;
+}
+
+.workspace-list li.active {
+  background: #dbeafe;
+  font-weight: 600;
+}
+
+.workspace-list li em {
+  font-style: normal;
+  color: #666;
+  font-weight: normal;
+}
+
+.workspace-delete-btn {
+  background: none;
+  border: none;
+  color: #999;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.workspace-delete-btn:hover {
+  color: #cf222e;
+}
+
+.workspace-changes {
+  padding: 0.4rem;
+}
+
+.workspace-changes-header {
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+}
+
+.workspace-changes-empty {
+  color: #888;
+  margin: 0;
+}
+
+.workspace-changes ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.workspace-changes li {
+  padding: 0.15rem 0;
+  word-break: break-all;
+}
+
+.change-badge {
+  display: inline-block;
+  width: 1rem;
+  text-align: center;
+  border-radius: 3px;
+  margin-right: 0.3rem;
+  font-weight: 700;
+}
+
+.change-added {
+  color: #1a7f37;
+}
+
+.change-modified {
+  color: #9a6700;
+}
+
+.page-view-pane textarea {
+  flex: 1;
+  min-height: 0;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  resize: none;
+  background: #fbfbfb;
+}
+
+.new-page-row {
+  padding: 0.4rem;
+  border-bottom: 1px solid #ddd;
+  margin-bottom: 0.5rem;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal-box {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  width: 360px;
+  max-width: 90vw;
+}
+
+.modal-box h3 {
+  margin-top: 0;
+}
+
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  margin-bottom: 0.75rem;
+}
+
+.modal-field input,
+.modal-field select {
+  font-size: 0.9rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.modal-hint {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.modal-error {
+  color: #cf222e;
+  font-size: 0.85rem;
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
