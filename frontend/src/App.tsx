@@ -12,13 +12,19 @@
  *   submitting is wired up (not yet — see the approved plan).
  *
  * Info:
- *   Selecting/creating a workspace snaps the browse branch/locale
- *   selectors to match it — editing only makes sense in that specific
- *   locale, so the two stay in sync rather than letting them silently
- *   diverge. Switching branch/locale away from the active workspace's
- *   own doesn't deselect it, though: it just means the selected page (if
- *   any) is being browsed read-only for a *different* locale than the
- *   workspace is for, which isEditing below reflects directly.
+ *   Editing turns on automatically: a useEffect calls
+ *   ensureDefaultWorkspace() (useWorkspace.ts) whenever the browsed
+ *   branch/locale changes, which creates-or-reuses a deterministically-
+ *   named default workspace for that exact pair — there's no separate
+ *   "start editing" step to discover. Explicitly creating/picking a
+ *   *named* workspace (WorkspaceBar's own "+ New"/list, still there for
+ *   anyone who wants extra parallel sessions, e.g. "fr-batch-2") snaps
+ *   the browse selectors to match it, same reasoning: editing only
+ *   makes sense in that specific locale, so the two stay in sync rather
+ *   than diverging. Switching branch/locale away from whatever's active
+ *   doesn't lose anything, though — it just means the next page you open
+ *   is edited in *that* pair's own (auto-provisioned or named) workspace
+ *   instead, which isEditing below reflects directly.
  */
 import "./App.css";
 import { useEffect, useState } from "react";
@@ -51,10 +57,12 @@ export default function App() {
 
   const {
     workspaces,
+    workspacesLoaded,
     active: activeWorkspace,
     selectWorkspace,
     createWorkspace,
     deleteWorkspace,
+    ensureDefaultWorkspace,
     changes,
     refreshChanges,
     error: workspaceError,
@@ -62,6 +70,16 @@ export default function App() {
 
   const [selectedPage, setSelectedPage] = useState<{ mdPath: string; title: string } | null>(null);
   const [showNewPageModal, setShowNewPageModal] = useState(false);
+
+  // Editing just works as soon as a locale's picked — see this file's
+  // header comment for why this replaced requiring an explicit "create a
+  // workspace" step. Waits on workspacesLoaded so the very first render
+  // (before the initial GET /api/workspace has even resolved) doesn't
+  // create a duplicate of a default workspace that already exists.
+  useEffect(() => {
+    if (!workspacesLoaded || !branch || !locale) return;
+    ensureDefaultWorkspace(branch, locale);
+  }, [branch, locale, workspacesLoaded, ensureDefaultWorkspace]);
 
   function changeBranch(next: string) {
     setBranch(next);
@@ -269,13 +287,7 @@ export default function App() {
               />
             )
           ) : (
-            <div className="app-main-placeholder">
-              {activeWorkspace && !isEditing
-                ? `Switch Branch/Language back to "${activeWorkspace.branch}" / "${
-                    locales[activeWorkspace.locale] || activeWorkspace.locale
-                  }" to keep editing in "${activeWorkspace.name}", or pick a page to browse this locale read-only.`
-                : "Pick a page from the nav to view it."}
-            </div>
+            <div className="app-main-placeholder">Pick a page from the nav to view it.</div>
           )}
         </main>
       </div>

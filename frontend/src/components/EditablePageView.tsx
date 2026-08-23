@@ -25,20 +25,32 @@
  *   factored out yet — worth revisiting once more editor surfaces need
  *   the same pattern.
  *
- *   The editing pane's own Source/Preview toggle (same component
- *   PageView.tsx uses) renders the *current in-progress content* — not
- *   the last-saved version — so flipping to Preview always reflects
- *   whatever's been typed so far, saved or not.
+ *   The editing pane has three modes now: Rich (real contentEditable
+ *   WYSIWYG — WysiwygEditor.tsx/Milkdown), Source (plain textarea), and
+ *   Preview (rendered, read-only, reflecting current in-progress
+ *   content — not the last-saved version). Rich is disabled — falling
+ *   back to Source — for any page containing pymdownx-specific syntax
+ *   (admonitions/details/tabs): see pymdownxBlocks.ts:
+ *   containsPymdownxBlocks()'s own comment for why that's not just a
+ *   missing-feature limitation but an active data-loss risk with a
+ *   generic rich-text editor. A page defaults to Rich mode on load when
+ *   it's safe to, since that's the actual point of building it; Source
+ *   otherwise.
  *
  *   "Insert image" captures the textarea's cursor position (selectionStart)
  *   BEFORE the modal opens — opening it moves focus away from the
  *   textarea, and reading selectionStart afterward would just see
  *   wherever focus last was instead of where the user actually clicked.
+ *   Only wired up for Source mode so far — inserting at a Rich-mode
+ *   (ProseMirror) cursor position needs different plumbing, not yet
+ *   built.
  */
 import { useEffect, useRef, useState } from "react";
 import { MarkdownPreview } from "../preview/renderMarkdown";
 import { AddImageModal } from "./AddImageModal";
 import { relativeAssetPath } from "../utils/relativePath";
+import { containsPymdownxBlocks } from "../preview/pymdownxBlocks";
+import { WysiwygEditor } from "../wysiwyg/WysiwygEditor";
 
 interface EditablePageData {
   content: string;
@@ -46,13 +58,33 @@ interface EditablePageData {
   error?: string;
 }
 
-type PaneMode = "source" | "preview";
+type PaneMode = "source" | "rich" | "preview";
 
-function PaneModeToggle({ mode, onChange }: { mode: PaneMode; onChange: (m: PaneMode) => void }) {
+function PaneModeToggle({
+  mode,
+  onChange,
+  richDisabled,
+}: {
+  mode: PaneMode;
+  onChange: (m: PaneMode) => void;
+  richDisabled: boolean;
+}) {
   return (
     <div className="pane-mode-toggle">
+      <button
+        className={mode === "rich" ? "active" : ""}
+        disabled={richDisabled}
+        title={
+          richDisabled
+            ? "This page has admonitions/tabs — rich editing for those isn't built yet, to avoid corrupting them. Edit in Source."
+            : undefined
+        }
+        onClick={() => onChange("rich")}
+      >
+        Rich
+      </button>
       <button className={mode === "source" ? "active" : ""} onClick={() => onChange("source")}>
-        Edit
+        Source
       </button>
       <button className={mode === "preview" ? "active" : ""} onClick={() => onChange("preview")}>
         Preview
@@ -126,6 +158,11 @@ export function EditablePageView({
 
         setContent(pageData.content);
         setIsNew(pageData.isNew);
+        // Rich is the whole point when it's safe — default to it rather
+        // than making every page start in Source and requiring an extra
+        // click. Pages with pymdownx blocks default to Source instead
+        // (richDisabled below keeps the button itself disabled too).
+        setEditMode(containsPymdownxBlocks(pageData.content) ? "source" : "rich");
 
         if (pageData.isNew) {
           // The materialized workspace copy already *is* a straight copy
@@ -208,6 +245,13 @@ export function EditablePageView({
   if (loading) return <div className="page-view-loading">Loading {title}…</div>;
   if (loadError) return <div className="page-view-error">{loadError}</div>;
 
+  const richDisabled = containsPymdownxBlocks(content);
+  // The safety gate isn't just about *offering* Rich mode — content that
+  // had admonitions/tabs added (or already had them) since Rich mode was
+  // entered must not stay silently in a mode that would corrupt them on
+  // the next edit.
+  const effectiveMode = editMode === "rich" && richDisabled ? "source" : editMode;
+
   return (
     <div className="page-view">
       <div className="page-view-header">
@@ -226,14 +270,18 @@ export function EditablePageView({
         <div className="page-view-pane">
           <div className="page-view-pane-label">
             {localeName} (editing)
-            <PaneModeToggle mode={editMode} onChange={setEditMode} />
+            <PaneModeToggle mode={effectiveMode} onChange={setEditMode} richDisabled={richDisabled} />
           </div>
-          {editMode === "source" && (
+          {effectiveMode === "source" && (
             <div className="editor-toolbar">
               <button onClick={openImageModal}>Insert image</button>
             </div>
           )}
-          {editMode === "source" ? (
+          {effectiveMode === "rich" ? (
+            <div className="wysiwyg-scroll">
+              <WysiwygEditor content={content} onChange={handleChange} />
+            </div>
+          ) : effectiveMode === "source" ? (
             <textarea
               ref={textareaRef}
               value={content}

@@ -67,6 +67,17 @@ import type { Root, BlockContent } from "mdast";
 const ADMONITION_RE = /^(\s*)(!!!|\?\?\?\+?)\s+(\S+)(?:\s+"([^"]*)")?\s*$/;
 const TAB_RE = /^(\s*)===\s+"([^"]*)"\s*$/;
 
+// Used by EditablePageView.tsx's safety gate: a generic contentEditable
+// WYSIWYG editor (frontend/src/wysiwyg/) has no custom handling for this
+// syntax at all yet, and CommonMark's own "lazy continuation" rule means
+// naively round-tripping a page containing it would silently flatten the
+// `!!!`/indented-body structure into a plain paragraph on save — real
+// data loss, not just a display quirk. Pages that match stay in Source
+// mode until real custom-node support exists (see DEV_NOTES.md).
+export function containsPymdownxBlocks(source: string): boolean {
+  return source.split("\n").some((line) => ADMONITION_RE.test(line) || TAB_RE.test(line));
+}
+
 export type BlockMarker =
   | { outputLine: number; kind: "admonition"; type: string; title: string }
   | { outputLine: number; kind: "details"; type: string; title: string; openByDefault: boolean }
