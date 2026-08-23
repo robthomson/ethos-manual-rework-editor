@@ -1,3 +1,26 @@
+## 0.2.0
+
+Complete rewrite as a desktop app (Electron + React), replacing the
+previous Python/tkinter version.
+
+- Sign in with GitHub via device flow -- no more pasting a personal
+  access token
+- Browse branches/languages and the manual's table of contents, with
+  each page's translation status (missing / stale / up to date) shown
+  at a glance
+- Editing turns on automatically as soon as you pick a language -- no
+  separate "create a workspace" step
+- Edit a page as real rich text (bold/italic/link/image), as raw
+  Markdown, or as a live rendered preview -- switch between them anytime
+- Insert images by uploading or picking one already used elsewhere in
+  that language
+- Create brand-new pages and sections (English only -- every other
+  language only ever translates what already exists)
+- Discard local changes to any page, one at a time, if you want to
+  start over
+- Submit for review opens a draft pull request; submitting again
+  updates the same one instead of opening a duplicate
+
 ## 0.1.0
 
 - Sign in with a GitHub personal access token to submit translations as
