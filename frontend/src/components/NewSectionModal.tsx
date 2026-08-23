@@ -46,7 +46,7 @@ export function NewSectionModal({ onCreate, onClose }: NewSectionModalProps) {
   return (
     <div className="modal-overlay">
       <div className="modal-box">
-        <h3>New section (English)</h3>
+        <h3>New section</h3>
 
         <label className="modal-field">
           Title

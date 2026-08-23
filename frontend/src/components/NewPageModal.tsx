@@ -49,7 +49,7 @@ export function NewPageModal({ sections, onCreate, onClose }: NewPageModalProps)
   return (
     <div className="modal-overlay">
       <div className="modal-box">
-        <h3>New page (English)</h3>
+        <h3>New page</h3>
 
         <label className="modal-field">
           Title
