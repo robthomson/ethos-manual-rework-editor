@@ -268,10 +268,10 @@ export default function App() {
 
           {canAuthorNewPages && (
             <div className="new-page-row">
-              <button className="link-button" onClick={() => setShowNewPageModal(true)}>
+              <button className="new-item-button" onClick={() => setShowNewPageModal(true)}>
                 + New Page (English)
               </button>
-              <button className="link-button" onClick={() => setShowNewSectionModal(true)}>
+              <button className="new-item-button" onClick={() => setShowNewSectionModal(true)}>
                 + New Section (English)
               </button>
             </div>
