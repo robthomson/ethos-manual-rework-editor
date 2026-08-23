@@ -62,8 +62,15 @@ import fs from "fs-extra";
 import path from "path";
 import yaml from "js-yaml";
 import { isSafePathSegment, isSafeRelativePath } from "./safePath";
-import { fetchPageSource, tryFetchPageSource, fetchRawMkdocsYaml, docsPath, RepoError } from "./mkdocsConfig";
-import { splitFrontmatter } from "./frontmatter";
+import {
+  fetchPageSource,
+  tryFetchPageSource,
+  fetchRawMkdocsYaml,
+  docsPath,
+  latestCommitSha,
+  RepoError,
+} from "./mkdocsConfig";
+import { splitFrontmatter, joinFrontmatter } from "./frontmatter";
 import type { GitHubToken } from "./githubClient";
 
 export class WorkspaceError extends Error {}
@@ -713,4 +720,66 @@ export async function discardChange(name: string, mdPath: string): Promise<Disca
   await fs.remove(workingPath);
   await removeNavEntry(root, mdPath);
   return { deleted: true };
+}
+
+export interface PreparedChange {
+  repoPath: string; // repo-root-relative — e.g. "docs/fr/getting-started/main-views.md"
+  binary: boolean;
+  content?: string; // text files
+  buffer?: Buffer; // images
+}
+
+// Turns one scanChanges() entry into exactly what gitRoutes.ts needs to
+// build a Git tree item — the one place that knows how a workspace's raw
+// on-disk file becomes the actual bytes to commit, so gitRoutes.ts itself
+// only has to deal with GitHub's API, never this project's own workspace
+// layout or frontmatter convention.
+//
+// Three cases:
+//   1. "mkdocs.yml" — repo-root file, committed as-is (no frontmatter
+//      concept, it's YAML not a translated page).
+//   2. An image — read as a raw Buffer (see gitRoutes.ts's own comment on
+//      why a binary file needs a real blob, not inline UTF-8 content).
+//   3. A .md page — the working copy never carries frontmatter at all
+//      (stripped at materialize time, see this file's header comment).
+//      An English page is committed as-is; a translation gets
+//      `translated_from:` re-attached, bumped to the English page's
+//      *current* commit SHA (not whatever it was when this page was
+//      materialized) — matching submit.py's own behavior, and the whole
+//      reason hooks/i18n_status.py's staleness check exists at all. Any
+//      other frontmatter fields a real prior translation already carried
+//      (from its own `.frontmatter/` sidecar) are preserved alongside it.
+export async function prepareChangeForCommit(
+  token: GitHubToken | null,
+  name: string,
+  changePath: string,
+): Promise<PreparedChange> {
+  const meta = await readMeta(name);
+  const root = workspaceRoot(name);
+
+  if (changePath === "mkdocs.yml") {
+    const content = await fs.readFile(mkdocsWorkingPath(root), "utf8");
+    return { repoPath: "mkdocs.yml", binary: false, content };
+  }
+
+  if (IMAGE_EXTENSIONS.test(changePath)) {
+    const buffer = await fs.readFile(path.join(root, docsPath(meta.locale, changePath)));
+    return { repoPath: docsPath(meta.locale, changePath), binary: true, buffer };
+  }
+
+  const rawBody = await fs.readFile(workingCopyPath(root, meta.locale, changePath), "utf8");
+
+  if (meta.locale === "en") {
+    // English is the source of truth — no translated_from concept applies
+    // to it at all.
+    return { repoPath: docsPath("en", changePath), binary: false, content: rawBody };
+  }
+
+  const sidecarPath = frontmatterSidecarPath(root, meta.locale, changePath);
+  const existingFrontmatter = (await fs.pathExists(sidecarPath)) ? await fs.readJson(sidecarPath) : {};
+
+  const englishSha = await latestCommitSha(token, meta.branch, docsPath("en", changePath));
+  const content = joinFrontmatter({ ...existingFrontmatter, translated_from: englishSha }, rawBody);
+
+  return { repoPath: docsPath(meta.locale, changePath), binary: false, content };
 }

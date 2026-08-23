@@ -616,6 +616,48 @@
   color: #cf222e;
 }
 
+.workspace-submit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid #ddd;
+}
+
+.workspace-submit button {
+  font-size: 0.85rem;
+  padding: 0.35rem 0.8rem;
+  border: 1px solid #24292f;
+  border-radius: 4px;
+  background: #24292f;
+  color: white;
+  cursor: pointer;
+}
+
+.workspace-submit button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.pr-status {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.pr-status-open {
+  color: #1a7f37;
+}
+
+.pr-status-merged {
+  color: #8250df;
+}
+
+.pr-status-closed {
+  color: #cf222e;
+}
+
 .change-badge {
   display: inline-block;
   width: 1rem;

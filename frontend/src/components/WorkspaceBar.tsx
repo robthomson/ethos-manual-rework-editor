@@ -32,9 +32,21 @@
  *   possibly-substantial translation work, not just an empty workspace
  *   shell. stopPropagation so clicking it doesn't also trigger the row's
  *   own onSelectChange and open the page you're discarding.
+ *
+ *   Submit (backend/routes/gitRoutes.ts) — the one action here gated on
+ *   isAuthenticated, since committing/opening a PR needs a real GitHub
+ *   token, unlike everything else in this file. Disabled with an
+ *   explanatory title rather than hidden outright when signed out or
+ *   there's nothing to submit, so it's still discoverable. Shows the
+ *   workspace's current PR status (useWorkspace.ts's own prStatus,
+ *   refetched on window focus — a PR can get merged/closed on github.com
+ *   in another tab) above the button when one exists, since "submit"
+ *   means something different once a PR's already open ("update it")
+ *   versus none yet ("create one") — submitPullRequest() on the backend
+ *   already handles that distinction itself; this is just reflecting it.
  */
 import { useEffect, useState, type MouseEvent } from "react";
-import type { ChangeEntry, WorkspaceMeta } from "../hooks/useWorkspace";
+import type { ChangeEntry, PrStatus, SubmitResult, WorkspaceMeta } from "../hooks/useWorkspace";
 
 interface WorkspaceBarProps {
   workspaces: WorkspaceMeta[];
@@ -50,6 +62,9 @@ interface WorkspaceBarProps {
   branch: string;
   defaultLocale: string;
   locales: Record<string, string>;
+  isAuthenticated: boolean;
+  prStatus: PrStatus | null;
+  onSubmit: (name: string) => Promise<SubmitResult>;
 }
 
 export function WorkspaceBar({
@@ -66,11 +81,16 @@ export function WorkspaceBar({
   branch,
   defaultLocale,
   locales,
+  isAuthenticated,
+  prStatus,
+  onSubmit,
 }: WorkspaceBarProps) {
   const [showNew, setShowNew] = useState(false);
   const [name, setName] = useState("");
   const [locale, setLocale] = useState(defaultLocale);
   const [creating, setCreating] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitResult, setSubmitResult] = useState<SubmitResult | null>(null);
 
   // Keeps the preselected locale in sync with whatever's currently
   // browsed if the form is opened fresh under a different one — but
@@ -79,6 +99,13 @@ export function WorkspaceBar({
   useEffect(() => {
     if (!showNew) setLocale(defaultLocale);
   }, [defaultLocale, showNew]);
+
+  // A submit result belongs to whichever workspace was active when it
+  // happened — switching away shouldn't leave a stale "PR created" banner
+  // showing under a now-different workspace.
+  useEffect(() => {
+    setSubmitResult(null);
+  }, [active?.name]);
 
   async function handleCreate() {
     if (!name.trim()) return;
@@ -96,6 +123,15 @@ export function WorkspaceBar({
     if (!window.confirm(`Discard local changes to "${mdPath}"? This can't be undone.`)) return;
     const result = await onDiscardChange(mdPath);
     if (!result.ok) window.alert(result.error || "Couldn't discard changes — please try again.");
+  }
+
+  async function handleSubmit() {
+    if (!active) return;
+    setSubmitting(true);
+    setSubmitResult(null);
+    const result = await onSubmit(active.name);
+    setSubmitting(false);
+    setSubmitResult(result);
   }
 
   return (
@@ -175,6 +211,54 @@ export function WorkspaceBar({
               </li>
             ))}
           </ul>
+
+          <div className="workspace-submit">
+            {prStatus && prStatus.state !== "none" && prStatus.url && (
+              <p className={`pr-status pr-status-${prStatus.state}`}>
+                <a href={prStatus.url} target="_blank" rel="noopener noreferrer">
+                  PR #{prStatus.prNumber}
+                </a>{" "}
+                {prStatus.state === "open"
+                  ? "open"
+                  : prStatus.state === "merged"
+                    ? "merged"
+                    : "closed"}
+              </p>
+            )}
+
+            <button
+              disabled={submitting || !isAuthenticated || changes.length === 0}
+              title={
+                !isAuthenticated
+                  ? "Sign in with GitHub to submit."
+                  : changes.length === 0
+                    ? "Nothing to submit yet."
+                    : undefined
+              }
+              onClick={handleSubmit}
+            >
+              {submitting
+                ? "Submitting…"
+                : prStatus?.state === "open"
+                  ? "Update pull request"
+                  : "Submit for review"}
+            </button>
+
+            {submitResult && !submitResult.ok && (
+              <p className="workspace-error">{submitResult.error}</p>
+            )}
+            {submitResult?.ok && submitResult.status === "no_changes" && (
+              <p className="workspace-changes-empty">Nothing to submit.</p>
+            )}
+            {submitResult?.ok && submitResult.url && (
+              <p className="pr-status pr-status-open">
+                {submitResult.status === "pr_created" ? "Draft PR created: " : "PR updated: "}
+                <a href={submitResult.url} target="_blank" rel="noopener noreferrer">
+                  #{submitResult.prNumber}
+                </a>
+              </p>
+            )}
+          </div>
         </div>
       )}
     </div>

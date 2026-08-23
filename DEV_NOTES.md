@@ -247,13 +247,39 @@ repo:**
   (originally didn't — docEditor's own `dev` script doesn't either; you're
   expected to open a plain browser tab. Fixed here since a desktop app
   that never shows its own window during dev is a bad loop).
+- **Commit + PR submission** (`backend/routes/gitRoutes.ts`, `POST
+  /api/workspace/:name/submit`) — the one thing that was still local-
+  disk-only until now. Adapted from rotorflight-docEditor's own
+  gitRoutes.ts (same Git Data API mechanics: fork → ensure/sync branch →
+  build a tree diff → commit → open/update PR — "unchanged in shape" per
+  the original plan), with the mechanics this project actually needs
+  layered on: branch name is the workspace's own name directly (one
+  branch/PR per locale-workspace session, matching this app's editing
+  model); `workspaceStore.ts:prepareChangeForCommit()` is the one place
+  that turns a `scanChanges()` entry into real commit bytes — an English
+  page or image committed as-is, a translation gets `translated_from:`
+  reattached and bumped to the English page's *current* commit SHA
+  (`latestCommitSha()`), matching `submit.py`'s own behavior and the
+  actual reason `hooks/i18n_status.py`'s staleness check exists at all.
+  PRs are created as drafts, mirroring the old Python app's own "draft
+  PRs by default" behavior — no "mark ready for review" action built yet
+  (needs a GraphQL mutation, the REST Pulls API can't flip draft→ready;
+  GitHub's own "Ready for review" button is the fallback for now).
+  **Repo-owner case** (caught live, testing against the real repo):
+  `ensureFork()` assumes the signed-in user is a *different* account
+  than `GITHUB_OWNER` — GitHub can't fork a repo onto the account that
+  already owns it, which 409'd immediately when testing as the repo's
+  actual owner. Fixed: when the signed-in login *is* `GITHUB_OWNER`, the
+  whole flow skips forking and commits directly to a branch on the real
+  repo, using the bare branch name (not `owner:branch`) as the PR's
+  `head` — GitHub's Pulls API only wants the owner-qualified form for a
+  genuinely cross-repo head. Verified end-to-end against the real repo
+  (not just a type-check): submitted a real pending Dutch-translation
+  edit, producing
+  [PR #3](https://github.com/robthomson/ethos-manual-rework/pull/3) — a
+  single-file, correctly-scoped diff with `translated_from:` intact.
 
 **Not built yet:**
-- The actual commit/PR submission flow (`gitRoutes.ts`/`ensureFork.ts` —
-  fork creation, real-merge-from-upstream, commit, open PR). This needs
-  the GitHub App to be *installed* on the account submitting, not just
-  registered — that's a separate step (Install App button on the app's
-  settings page).
 - **Custom nodes for pymdownx blocks in Rich mode** (admonitions/details/
   tabs) — see the dedicated section below; the approach is researched and
   written up, not yet implemented.
@@ -466,8 +492,10 @@ sign-in doesn't buy you.
    window together.
 4. Sign in via the button in the app; **also click "Install App"** on the
    GitHub App's settings page for whichever account will be tested with —
-   separate step from registering the App, needed before any commit/PR
-   flow (not yet built) will work.
+   separate step from registering the App, needed before the commit/PR
+   flow will work (not needed at all when testing as the repo's own
+   owner — see "Repo-owner case" above, that path skips forking
+   entirely).
 
 ## Open questions for next session
 
@@ -482,5 +510,10 @@ sign-in doesn't buy you.
   helpers (admonition/table/tab) from the original plan are still wanted
   as their own UI, or should wait for/fold into Rich mode's custom-node
   support above once that exists.
-- The diff-vs-English view, spellcheck, and the actual commit/PR flow
-  remain unbuilt — see "Not built yet" above.
+- The diff-vs-English view and spellcheck remain unbuilt — see "Not
+  built yet" above. Commit/PR submission is now built and verified
+  against the real repo; still worth building "mark ready for review"
+  (a GraphQL mutation — see the commit/PR entry above) and a real test
+  of the *non-owner* fork path (only the repo-owner-direct path has been
+  exercised against the live repo so far, since that's the account
+  available to test with).

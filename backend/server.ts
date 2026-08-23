@@ -46,6 +46,7 @@ import crypto from "crypto";
 import authRoutes from "./routes/authRoutes";
 import navRoutes from "./routes/navRoutes";
 import workspaceRoutes from "./routes/workspaceRoutes";
+import gitRoutes from "./routes/gitRoutes";
 
 const app = express();
 const PORT = process.env.PORT || 4100;
@@ -119,8 +120,12 @@ app.use("/api/nav", navRoutes);
 // workspaceRoutes.ts/workspaceStore.ts's header comments for why.
 app.use("/api/workspace", workspaceRoutes);
 
-// TODO (next slice): gitRoutes (commit/PR via the user's fork) once the
-// GitHub App is registered — see the approved plan.
+// Commit + PR submission — the one thing here that always needs a real
+// sign-in (see gitRoutes.ts's own requireAuth()). Mounted at the same
+// /api/workspace prefix as workspaceRoutes above (a sibling router, not
+// nested inside it) since it's still fundamentally "actions on a named
+// workspace" — just the one action that needs GitHub write access.
+app.use("/api/workspace", gitRoutes);
 
 // Health check — includes mode so electron/main.ts's startup health-check
 // can tell "our own production instance answered" apart from "something

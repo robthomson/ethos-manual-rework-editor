@@ -24,6 +24,19 @@
  *   workspace picker (createWorkspace/selectWorkspace, below) still
  *   exists for anyone who wants extra parallel sessions (e.g.
  *   "fr-batch-2") on top of that default.
+ *
+ *   submitWorkspace()/prStatus — the one action here that actually needs
+ *   sign-in (backend/routes/gitRoutes.ts). prStatus is refetched
+ *   whenever the active workspace changes and on window focus (same
+ *   reasoning as useAuth.ts's own appInstalled check: a PR can get
+ *   merged/closed on github.com in another tab, and the app has no other
+ *   way to notice). Known trade-off: the Changes list (refreshChanges/
+ *   scanChanges()) diffs against this workspace's own local `.baseline/`
+ *   snapshot, not against what's actually been pushed — so it keeps
+ *   showing the same pending changes right after a successful submit,
+ *   not "0" the way a real git status would. Resetting the baseline to
+ *   match what was just committed would need re-fetching it from
+ *   upstream; not done here.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -42,6 +55,20 @@ export interface WorkspaceMeta {
 export interface ChangeEntry {
   path: string;
   type: "added" | "modified";
+}
+
+export interface PrStatus {
+  state: "none" | "open" | "merged" | "closed";
+  prNumber?: number;
+  url?: string;
+}
+
+export interface SubmitResult {
+  ok: boolean;
+  status?: "pr_created" | "pr_updated" | "no_changes";
+  prNumber?: number;
+  url?: string;
+  error?: string;
 }
 
 const ACTIVE_KEY = "ethos_active_workspace";
@@ -79,6 +106,36 @@ export function useWorkspace() {
   useEffect(() => {
     refreshChanges();
   }, [refreshChanges]);
+
+  const [prStatus, setPrStatus] = useState<PrStatus | null>(null);
+
+  const refreshPrStatus = useCallback(async () => {
+    if (!activeName) {
+      setPrStatus(null);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/workspace/${encodeURIComponent(activeName)}/pr-status`);
+      if (!res.ok) {
+        // Not signed in, or some other transient failure — leave prStatus
+        // as "unknown" (null) rather than asserting "none" when it might
+        // genuinely have an open PR; the Submit button itself still works
+        // regardless of whether this status check succeeded.
+        setPrStatus(null);
+        return;
+      }
+      const data = await res.json();
+      setPrStatus(data);
+    } catch {
+      setPrStatus(null);
+    }
+  }, [activeName]);
+
+  useEffect(() => {
+    refreshPrStatus();
+    window.addEventListener("focus", refreshPrStatus);
+    return () => window.removeEventListener("focus", refreshPrStatus);
+  }, [refreshPrStatus]);
 
   const active = workspaces.find((w) => w.name === activeName) || null;
 
@@ -152,6 +209,14 @@ export function useWorkspace() {
     [activeName, workspaces],
   );
 
+  async function submitWorkspace(name: string): Promise<SubmitResult> {
+    const res = await fetch(`/api/workspace/${encodeURIComponent(name)}/submit`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) return { ok: false, error: data.error || "Failed to submit." };
+    if (name === activeName) await refreshPrStatus();
+    return { ok: true, ...data };
+  }
+
   return {
     workspaces,
     workspacesLoaded,
@@ -163,5 +228,7 @@ export function useWorkspace() {
     changes,
     refreshChanges,
     error,
+    prStatus,
+    submitWorkspace,
   };
 }

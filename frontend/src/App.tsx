@@ -92,6 +92,8 @@ export default function App() {
     changes,
     refreshChanges,
     error: workspaceError,
+    prStatus,
+    submitWorkspace,
   } = useWorkspace();
 
   const [selectedPage, setSelectedPage] = useState<{ mdPath: string; title: string } | null>(null);
@@ -331,6 +333,9 @@ export default function App() {
             branch={branch}
             defaultLocale={locale === "en" ? Object.keys(locales).find((l) => l !== "en") || "en" : locale}
             locales={locales}
+            isAuthenticated={isAuthenticated}
+            prStatus={prStatus}
+            onSubmit={submitWorkspace}
           />
 
           {canAuthorNewPages && (
