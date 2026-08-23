@@ -217,6 +217,33 @@ repo:**
   https://github.com/settings/apps/ethos-manual-editor). Never hit in
   practice so far since the real `.env` already overrides it correctly,
   but fixed the wrong default outright regardless.
+- **CI now builds this app, not the old Python one** — told directly the
+  old app "is no longer relevant". All three workflows
+  (`.github/workflows/{pr,push,release}.yml`) previously only ever built
+  the old `src/app.py` via PyInstaller; every PyInstaller step in all
+  three is now `npm install` (root + `backend/` + `frontend/`) +
+  `npm run dist` (electron-builder), keeping each workflow's own
+  existing trigger/purpose (`pr`/`push` build-check artifacts per OS,
+  `release/*` tags build **and** create the actual GitHub Release).
+  Windows dropped the old job's x86 (32-bit) leg — just x64 now,
+  matching normal practice for Electron apps today. No code-signing
+  certificates configured, so Windows/macOS output is unsigned
+  (SmartScreen/Gatekeeper will warn on first launch) — revisit if/when
+  signing certs are available. Version comes from the tag
+  (`release/X.Y.Z` → `X.Y.Z`) or a commit-SHA/PR-number placeholder for
+  the other two triggers, written into `package.json` via `npm pkg set
+  version=...` (not `npm version`, which refuses to run unless the git
+  working directory is clean — something `npm install` could easily
+  violate via lockfile drift) so electron-builder's own artifact-naming
+  templates pick it up. **Verified for real, not just written**: ran
+  `npm run dist` locally end-to-end (the exact command every workflow
+  now runs) and got a genuine, correctly-named
+  `Ethos Manual Editor Setup 0.2.0-x64.exe` (~88MB) out the other end —
+  only the Windows leg could be tested this way (no mac/linux hosts
+  here), but it's the same `electron-builder` invocation for every OS,
+  so this is a real, not just a paper, confirmation the pipeline works.
+  `src/` itself (and `README.md`/`Releases.md`, which still describe the
+  old app) are untouched for now — ask if those should also go.
 - **Image handling**: relative image `src`s resolve to real
   raw.githubusercontent.com URLs, replicating `mkdocs.yml`'s actual
   `i18n: fallback_to_default: true` config — a locale-specific screenshot
