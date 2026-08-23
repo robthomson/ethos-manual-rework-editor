@@ -7,6 +7,18 @@ Electron + React/TypeScript + Express), pulling architecture ideas from
 
 ## Where things stand (as of this branch)
 
+**The old Python/tkinter app (`src/`) is gone.** Told directly it's "no
+longer relevant" (after the CI switch-over above already stopped
+building it) — deleted the whole directory, its own `.gitignore`
+(PyInstaller/Python-cache patterns), and the root `.gitignore`'s
+`ethos-manual-translator.exe` entry (added `backend/dist/`, missing from
+that file the whole time — a real, harmless gap, now closed). `README.md`
+is fully rewritten to describe *this* app (OAuth device-flow sign-in, no
+pasted token; real download/build/release instructions matching the
+CI workflows above) instead of the old PAT-paste-in Python one.
+`Releases.md` and the Makefile never referenced the old app by name, so
+neither needed changes.
+
 **Working end-to-end, verified against the real, live `ethos-manual-rework`
 repo:**
 - Sign-in via GitHub OAuth device flow (a registered GitHub App —
@@ -205,13 +217,11 @@ repo:**
 - **Renamed to "Ethos Manual Editor"** (from "Ethos Manual Translator")
   across the Electron rewrite's own files — window title, in-app header,
   `package.json`/`backend/package.json` name/description, `appId`/
-  `productName`, `frontend/index.html`'s `<title>`. Deliberately did
-  *not* touch `README.md`, `.gitignore`'s `ethos-manual-translator.exe`
-  entry, or anything under `src/` — those describe the *old* Python/
-  tkinter app, which is still actually shipping under that name (see this
-  file's own "Repo layout" plan: retire `src/` and update `README.md`
-  only once the new app reaches parity). Caught a real, separate bug
-  while in `backend/config/github.ts` for this: `GITHUB_APP_INSTALL_URL`'s
+  `productName`, `frontend/index.html`'s `<title>`. At the time, deliberately
+  left `README.md`/`src/` untouched (the old Python app was still shipping
+  under that name) — since resolved, see this file's own "old Python app is
+  gone" note up top. Caught a real, separate bug while in
+  `backend/config/github.ts` for this: `GITHUB_APP_INSTALL_URL`'s
   fallback pointed at `ethos-manual-translator`, a slug that was never
   actually registered — the real App's slug is `ethos-manual-editor` (per
   https://github.com/settings/apps/ethos-manual-editor). Never hit in
@@ -394,9 +404,9 @@ writing — copy it into this repo if that path won't be reachable later).
 Short version:
 
 1. **Stack**: Electron + React/TS, `electron/` + `backend/` (Express) +
-   `frontend/` (Vite/React), mirroring docEditor's shape. `src/` (the
-   Python app) is untouched and still works — retire it only once this
-   reaches parity.
+   `frontend/` (Vite/React), mirroring docEditor's shape. `src/` (the old
+   Python app) has since been retired entirely — see this file's own
+   "old Python app is gone" note up top.
 2. **Auth**: GitHub OAuth device flow via a registered GitHub App, with
    per-user forks (not today's pasted-PAT direct-write model) — chosen
    for the nicer login UX, at the cost of needing the App registered

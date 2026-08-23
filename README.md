@@ -1,45 +1,36 @@
-# Ethos Manual Translator
+# Ethos Manual Editor
 
-A desktop GUI for translators working on [ethos-manual-rework](https://github.com/robthomson/ethos-manual-rework):
-sign in with a GitHub token, pick a page, edit your language's version next
-to the English source, and submit the result as a pull request -- no local
-git checkout or markdown editor of your own required.
+A desktop app for translators working on
+[ethos-manual-rework](https://github.com/robthomson/ethos-manual-rework):
+sign in with GitHub, pick a page, edit your language's version next to the
+English source (as rendered rich text, or raw markdown, or a live preview),
+and submit the result as a pull request — no local git checkout or markdown
+editor of your own required.
 
-**Status: working end to end.** Sign-in, branch/language/page browsing, the
-side-by-side editor with live preview, and submitting as a pull request are
-all wired up and verified against the real, live repo. See `src/app.py`'s
-module docstring for how each piece fits together and which pieces of
-ethos-manual-rework's own tooling (nav parsing, the `translated_from:`
-staleness convention, etc.) it reuses.
+Electron + React/TypeScript + Express. Replaces the previous Python/tkinter
+version of this tool.
 
-## Setting up your GitHub token
+**Status: working end to end**, verified against the real, live repo — sign-in,
+branch/language/page browsing, local editing (autosaving, no explicit "create
+a workspace" step needed), and committing + opening a pull request are all
+wired up. See `DEV_NOTES.md` for the full architecture writeup and what's not
+built yet (a diff-vs-English view, spellcheck, and rich-mode support for
+admonitions/tabs are the main gaps).
 
-Submitting a translation needs a **fine-grained personal access token**
-([create one here](https://github.com/settings/personal-access-tokens/new)),
-pasted into the app's "Sign in" box (only needed at submit time -- browsing
-and editing don't require signing in at all). Two separate settings on that
-page both need to be right, and it's easy to set one and miss the other:
+## Signing in
 
-- **Repository access** -- "Only select repositories" -> `ethos-manual-rework`.
-  (Leaving this on "Public Repositories (read-only)" silently caps the
-  token to read-only regardless of the permissions below.)
-- **Permissions** -- add both of these (the "Add permissions" button on the
-  token's Permissions tab):
-  - **Contents: Read and write** (needed to commit the edited page)
-  - **Pull requests: Read and write** (needed to open the PR, mark it
-    ready for review, or discard it -- a genuinely separate permission
-    from Contents; having Contents alone gets you a real commit but a
-    403 on anything PR-related)
+Sign-in uses GitHub's OAuth **device flow** — click "Sign in with GitHub" in
+the app, then enter the shown code at the `github.com` link it opens. No
+token to create or paste in yourself.
 
-  A third permission, **Metadata: Read-only**, will appear on its own,
-  tagged "Required" and locked -- GitHub adds that automatically
-  whenever any other repository permission is selected. Nothing to set
-  there, it's not something you add yourself; only Contents and Pull
-  requests need your attention.
+Browsing and editing don't need sign-in at all (everything lives in a local
+workspace on disk until you submit) — it's only needed once you click
+"Submit for review", since that's the one action that actually talks to
+GitHub with write access.
 
-If a permission is missing, the app's error message says which one --
-worth reading closely if submitting fails, rather than assuming the whole
-token is bad.
+The first time you submit, GitHub may ask you to **install the app** on your
+account — a separate step from signing in, needed once per account. The app
+tells you directly (a link in the top bar) if this hasn't happened yet.
 
 ## Download
 
@@ -50,37 +41,55 @@ https://github.com/robthomson/ethos-manual-rework-editor/releases
 ```
 
 Asset names:
-- Windows: `ethos-manual-translator-<version>-windows-<arch>.zip`
-- macOS: `ethos-manual-translator-<version>-macos-<arch>.zip`
-- Linux: `ethos-manual-translator-<version>-linux-<arch>.zip`
+- Windows: `Ethos Manual Editor Setup <version>-x64.exe`
+- macOS (Intel): `Ethos Manual Editor-<version>.dmg`
+- macOS (Apple Silicon): `Ethos Manual Editor-<version>-arm64.dmg`
+- Linux: `Ethos Manual Editor-<version>-<arch>.AppImage` and
+  `Ethos Manual Editor-<version>-<arch>.tar.gz` (`x64` or `arm64`)
 
-Every push to `main` and every PR also builds (but doesn't release) binaries
-for all platforms, uploaded as workflow run artifacts -- see the Actions tab.
+None of these are code-signed yet, so Windows SmartScreen / macOS Gatekeeper
+will warn on first launch ("keep anyway" / "open anyway").
 
-## Developer Notes
+Every push to `main` and every PR also builds (but doesn't release) the same
+binaries for all platforms, uploaded as workflow run artifacts — see the
+Actions tab.
 
-Requires Python 3.9+.
+## Developer setup
+
+Requires Node.js (LTS) and `make` (Windows: Git Bash/MSYS2 or WSL — see the
+Makefile's own header comment if `make` itself has trouble finding `npm`).
 
 ```bash
-cd src
-pip install -r requirements_translator.txt
-python app.py
+make init   # npm install at root + backend/ + frontend/
+make dev    # boots backend (Express) + Vite + a real Electron window together
 ```
 
-or `run_app.cmd` (Windows) / `./run_app.sh` (Linux/macOS) once dependencies
-are installed.
+`make help` lists every other target (`build`, `dist`, `clean`, `distclean`,
+running just the backend or frontend on their own, etc.).
+
+You'll also need a `backend/.env` with a registered GitHub App's device-flow
+client ID for sign-in to work locally:
+
+```
+GITHUB_CLIENT_ID=<your app's client id>
+GITHUB_APP_INSTALL_URL=https://github.com/apps/<your-app-slug>/installations/new
+```
+
+The App needs Device Flow enabled and Contents (read/write) + Pull requests
+(read/write) permissions — Metadata (read) gets added automatically. See
+`DEV_NOTES.md` for the exact registration steps.
 
 ### Building a standalone executable
 
-Windows: `src\make.cmd` (builds and drops `ethos-manual-translator.exe` in
-the repo root). macOS/Linux: same PyInstaller invocations as
-`.github/workflows/*.yml` -- see those for the exact flags per platform.
+`npm run dist` (or `make dist`) — packages the current platform's build via
+`electron-builder`, output in `release/`. This is the same command every CI
+workflow runs; there's no separate manual packaging step to keep in sync.
 
 ## Releasing
 
-Same tag-based flow as rotorflight-lua-ethos-suite-updater:
-- `release/<version>` tag -> real release, built for Windows (x64/x86),
-  macOS (Intel/ARM), and Linux (x64/arm64), notes pulled from `Releases.md`.
-- Add a matching `## <version>` section to `Releases.md` before tagging --
+- `release/<version>` tag → a real GitHub Release, built for Windows (x64),
+  macOS (Intel/Apple Silicon), and Linux (x64/arm64), notes pulled from
+  `Releases.md`.
+- Add a matching `## <version>` section to `Releases.md` before tagging —
   `.github/scripts/extract-release-notes.py` pulls that section verbatim
   into the release notes.

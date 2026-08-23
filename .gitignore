@@ -1,11 +1,7 @@
-ethos-manual-translator.exe
-__pycache__/
-*.pyc
-*.pyo
-
-# Electron rewrite (electron/, backend/, frontend/)
 node_modules/
 electron/dist/
 frontend/dist/
+backend/dist/
 release/
 *.tsbuildinfo
+frontend/.vite/

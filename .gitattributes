@@ -1,0 +1,18 @@
+# Normalize all text files to LF in the repository, regardless of the
+# working tree's own line endings (Windows editors/tools can silently
+# convert checked-out files to CRLF locally) — caught live: with no
+# .gitattributes at all and no core.autocrlf configured, a working tree
+# that had drifted to CRLF made *every* tracked text file show as
+# "modified" with a 100%-line diff, even ones never actually edited.
+* text=auto eol=lf
+
+# Genuine binaries — never touch line endings in these regardless of
+# extension-based heuristics.
+*.ico binary
+*.icns binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.woff binary
+*.woff2 binary
