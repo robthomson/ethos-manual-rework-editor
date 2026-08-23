@@ -79,6 +79,19 @@ jobs:
         shell: bash
         run: npm pkg set version="${{ env.GIT_VER }}"
 
+      # The Windows leg's 1h24m hang (see job comment above) was traced to
+      # a dead stop right after electron-builder's signtool pass on a
+      # freshly-created, unsigned exe, with the log then going silent for
+      # the rest of the run. That is the signature of Windows Defender's
+      # real-time scanner grabbing/holding the file (a well-documented
+      # issue for Electron+NSIS builds on hosted Windows runners), not a
+      # bug in this config. Disabling it for this ephemeral, single-use
+      # VM is safe and standard practice for exactly this situation.
+      - name: Disable Windows Defender real-time scanning
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
       # Builds natively for whatever OS/arch this runner already is — no
       # explicit --win/--mac/--linux or --x64/--arm64 flags needed, since
       # each matrix entry's host already matches the target (matching how

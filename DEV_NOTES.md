@@ -268,6 +268,49 @@ repo:**
   plain local run. Fixed by making `dist` always pass
   `--publish never` explicitly, so this can't happen regardless of what
   environment it runs in.
+- **CRLF/`.gitattributes`**: cutting the first real release (`git add -A`
+  for the version bump) unexpectedly staged ~60 unrelated files, each as
+  a 100%-line-diff. Root cause: no `core.autocrlf` was configured anywhere
+  (system/global/local all empty), so the working tree had silently
+  drifted to CRLF over time with nothing normalizing it back on
+  `git add`. Fixed by adding `.gitattributes` (`* text=auto eol=lf`, plus
+  explicit `binary` markers for image/font/icon extensions so those never
+  get text-normalized) and running `git add --renormalize .` once to
+  settle the whole tree onto LF for real.
+- **Windows CI hang, 1h24m, zero error output**, while all 4 other
+  platforms finished in minutes — confirmed via
+  `gh api .../actions/jobs/<id>` that "Build + package (electron-builder)"
+  was the stuck step. Added `timeout-minutes: 25` to the `build-app` job
+  in all three workflows as a safety net regardless of root cause — but
+  a repeat run just hit that same 25-minute wall (`Error: The operation
+  was canceled.`) instead of finishing, confirming the hang itself was
+  still unfixed, just caught faster. Pulled the full log for that run
+  (`gh run view <id> --job <id> --log`, only fetchable once the job
+  reaches `completed`) and found it goes dead silent for exactly 24
+  minutes, with the last real line being electron-builder's own
+  `no signing info identified, signing is skipped` for `elevate.exe`
+  (a signtool pass on a freshly-built, unsigned exe) immediately before
+  the log stops. First attempt, `signAndEditExecutable: false` in
+  `package.json`'s `win` block (a real, documented electron-builder
+  option, default `true`) — verified **locally** to be incomplete: it
+  does stop signing for the main app exe (confirmed zero signtool calls
+  for it), but electron-builder's NSIS target has its own separate,
+  ungated signtool call for the *uninstaller* exe
+  (`__uninstaller-nsis-*.exe`), and that same local verification build
+  then failed outright with `ENOENT: ... unlink '...nsis.7z'` inside
+  electron-builder's own `nsisUtil.ts` cleanup step, producing a
+  194KB stub instead of a real ~88MB installer. That failure signature —
+  dead stop / vanished file right after a signtool pass on a fresh
+  unsigned exe — is the known pattern for Windows Defender's real-time
+  scanner grabbing or quarantining the file, not a bug in this project's
+  config (a documented issue for Electron+NSIS builds on Windows CI
+  runners generally). Fixed by disabling real-time scanning for the
+  Windows leg specifically (`Set-MpPreference -DisableRealtimeMonitoring
+  $true`, Windows-only step, right before the build step, in all three
+  workflows) — safe on an ephemeral, single-use CI VM. Kept
+  `signAndEditExecutable: false` too (still a real, if partial,
+  reduction in signtool calls). **Not yet re-verified in CI** — needs a
+  fresh tagged run to confirm the Windows leg actually completes now.
 - **Image handling**: relative image `src`s resolve to real
   raw.githubusercontent.com URLs, replicating `mkdocs.yml`'s actual
   `i18n: fallback_to_default: true` config — a locale-specific screenshot
