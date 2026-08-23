@@ -78,6 +78,7 @@ export default function App() {
     error,
     addLocalPage,
     addLocalSection,
+    refreshToc,
   } = useNav();
 
   const {
@@ -96,6 +97,12 @@ export default function App() {
   const [selectedPage, setSelectedPage] = useState<{ mdPath: string; title: string } | null>(null);
   const [showNewPageModal, setShowNewPageModal] = useState(false);
   const [showNewSectionModal, setShowNewSectionModal] = useState(false);
+  // Bumped whenever a discard reverts the *currently open* page back to
+  // its baseline — included in EditablePageView's own key below to force
+  // a fresh mount (and re-fetch of the now-reverted content), since
+  // otherwise it'd keep showing the in-memory content from before the
+  // discard even though the file on disk just changed out from under it.
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   // Editing just works as soon as a locale's picked — see this file's
   // header comment for why this replaced requiring an explicit "create a
@@ -211,10 +218,46 @@ export default function App() {
     if (isEditing) refreshChanges();
   }, [isEditing, selectedPage, refreshChanges]);
 
+  // Shared by EditablePageView's own "Discard changes" button and
+  // WorkspaceBar's per-entry one in the Changes list — asked directly:
+  // "what if we want to cancel changes to the page?". Backend's own
+  // discardChange() (workspaceStore.ts) reports whether the underlying
+  // page/section was actually deleted (a page/section created *this
+  // session*, no baseline to fall back to) versus just reverted to its
+  // baseline (a real edit, or a first-time translation) — this is what
+  // decides what happens next: a deleted page can't just be reloaded, so
+  // the selection clears and the nav refetches for real (unlike
+  // addLocalPage()/addLocalSection(), a removal needs the backend's own
+  // current view, not a client-side splice); a reverted one just forces
+  // EditablePageView to remount (via reloadNonce) and show the restored
+  // content, staying right where you were.
+  async function discardPageChange(mdPath: string): Promise<{ ok: boolean; error?: string }> {
+    if (!activeWorkspace) return { ok: false, error: "No active workspace." };
+
+    const res = await fetch(`/api/workspace/${encodeURIComponent(activeWorkspace.name)}/discard`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: mdPath }),
+    });
+    const data = await res.json();
+    if (!res.ok) return { ok: false, error: data.error || "Failed to discard changes." };
+
+    await refreshChanges();
+    if (mdPath === selectedPage?.mdPath) {
+      if (data.deleted) {
+        setSelectedPage(null);
+        await refreshToc();
+      } else {
+        setReloadNonce((n) => n + 1);
+      }
+    }
+    return { ok: true };
+  }
+
   return (
     <div className="app-shell">
       <header className="app-topbar">
-        <h1 className="app-title">Ethos Manual Translator</h1>
+        <h1 className="app-title">Ethos Manual Editor</h1>
 
         <div className="app-topbar-controls">
           <label>
@@ -282,6 +325,7 @@ export default function App() {
             onDelete={deleteWorkspace}
             changes={changes}
             onSelectChange={selectChangedPage}
+            onDiscardChange={discardPageChange}
             selectedPath={selectedPage?.mdPath ?? null}
             createError={workspaceError}
             branch={branch}
@@ -327,14 +371,16 @@ export default function App() {
           {selectedPage ? (
             isEditing ? (
               <EditablePageView
-                key={`${activeWorkspace!.name}:${selectedPage.mdPath}`}
+                key={`${activeWorkspace!.name}:${selectedPage.mdPath}:${reloadNonce}`}
                 workspace={activeWorkspace!.name}
                 branch={activeWorkspace!.branch}
                 locale={locale}
                 localeName={locales[locale] || locale}
                 mdPath={selectedPage.mdPath}
                 title={selectedPage.title}
+                hasChange={changes.some((c) => c.path === selectedPage.mdPath)}
                 onSaved={refreshChanges}
+                onDiscard={() => discardPageChange(selectedPage.mdPath)}
               />
             ) : (
               <PageView

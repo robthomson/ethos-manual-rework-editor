@@ -115,6 +115,29 @@ repo:**
   Protocol driving real selections + clicks, not just a type-check):
   Bold/Italic/Link all round-tripped to exactly correct markdown
   (`**Emergency**`, `*watchdog*`, `[SD card failure](https://…)`).
+  **Moved out of the box** shortly after: rendering the toolbar *inside*
+  `WysiwygEditor.tsx` (above `<Milkdown/>`, inside the bordered/scrollable
+  box) added an extra row there that the English reference pane didn't
+  have, pushing that side's content start lower — caught live from a
+  screenshot showing the two panes' text starting at visibly different
+  heights. `WysiwygEditorHandle` (an imperative ref: `toggleBold`/
+  `toggleItalic`/`applyLink`/`insertImage`) is what `WysiwygEditor.tsx`
+  exposes now instead of rendering its own buttons — `EditablePageView.tsx`
+  owns the actual toolbar, placed in the *shared* `page-view-pane-label`
+  row (the same one the Rich/Source/Preview toggle and English's own
+  Source/Preview toggle already live in), so every mode keeps exactly one
+  header row regardless of which controls it needs. That row also picked
+  up `min-height: 3rem` (shared by both panes) after a second live check
+  at a narrower pane width showed the *same* misalignment creeping back
+  in — Rich mode's 7-button controls group wraps onto a second line
+  there while English's plain 2-button toggle never does, so without a
+  shared reserved height the two rows end up different heights again
+  regardless of the restructuring. Image insertion is unified across
+  Source/Rich too: Source mode still captures the textarea's cursor
+  position before the modal opens (loses it otherwise, since opening the
+  modal moves focus away), but Rich mode doesn't need that at all —
+  ProseMirror keeps its own selection independent of DOM focus, so
+  `insertImage()` just inserts at wherever the live selection still is.
 - **Hard-wrapped paragraphs rendered with huge gaps in Rich mode**
   (fixed): this repo's markdown source hard-wraps prose at ~80 columns
   (real physical line breaks *within* a paragraph, not blank-line
@@ -136,6 +159,66 @@ repo:**
   space into a visibly padded 32px gap. Fixed by scoping every such
   selector to `[contenteditable="true"]`, which only ever matches the
   one real editable root.
+- **English reference pane has its own Source/Preview toggle**
+  (`EnglishModeToggle` in `EditablePageView.tsx`) — this editing view
+  never had one at all before, unlike `PageView.tsx`'s read-only
+  browsing view, which already toggles both its panes independently.
+  Always `locale="en"` for its own `MarkdownPreview` call regardless of
+  which locale is actually being translated, matching `PageView.tsx`'s
+  own English-preview call.
+- **Discard changes** (`discardChange()` in `workspaceStore.ts`, `POST
+  /api/workspace/:name/discard`) — asked directly: "what if we want to
+  cancel changes to the page?". Undoes one pending change (whatever
+  `scanChanges()` would report for that exact path), not the whole
+  workspace. Three cases, keyed off what's actually on disk rather than
+  the change's own "added"/"modified" label (which calls an untranslated
+  page's *first* translation "added" too, same as a genuinely new page —
+  see `scanChanges()`'s own comment — but those need different discard
+  behavior):
+  1. An uploaded image (no baseline concept at all): delete the file.
+  2. A real per-page baseline exists (a prior real translation, or the
+     English-fallback text a first translation started from): overwrite
+     the working copy with it.
+  3. No baseline: a page or section created *this session*
+     (`createNewPage()`/`createNewSection()` deliberately skip writing
+     one) — delete the file and remove its nav entry from the local
+     `mkdocs.yml` (`removeNavEntry()`, the reverse of those two
+     functions' own insertion). Known scope cut: discarding a *section*
+     that already has child pages added under it removes the whole
+     section from the nav at once, without cascading to also discard
+     each child — their own working files are left on disk with no nav
+     entry pointing at them any more.
+
+  The backend reports which case happened (`{ deleted: boolean }`) so
+  the frontend knows what to do next: case 2 just remounts
+  `EditablePageView` (via a `reloadNonce` bumped in `App.tsx`) to show
+  the reverted content, staying on the same page; cases 1/3 clear the
+  selection and refetch the nav toc for real (unlike
+  `addLocalPage()`/`addLocalSection()`'s own client-side splice, a
+  removal needs the backend's actual current view). Two entry points:
+  `EditablePageView.tsx`'s own "Discard changes" button (the currently
+  open page) and a per-entry "↺" button in `WorkspaceBar.tsx`'s Changes
+  list (any changed page, confirmed first — unlike the workspace-delete
+  button next to it, which doesn't, since this can throw away real
+  translation work). Verified against the real running app for both
+  cases: reverting an edited existing page (content restored, change
+  entry gone) and discarding a brand-new section just created (file
+  deleted, nav entry gone, kicked back to the "pick a page" placeholder).
+- **Renamed to "Ethos Manual Editor"** (from "Ethos Manual Translator")
+  across the Electron rewrite's own files — window title, in-app header,
+  `package.json`/`backend/package.json` name/description, `appId`/
+  `productName`, `frontend/index.html`'s `<title>`. Deliberately did
+  *not* touch `README.md`, `.gitignore`'s `ethos-manual-translator.exe`
+  entry, or anything under `src/` — those describe the *old* Python/
+  tkinter app, which is still actually shipping under that name (see this
+  file's own "Repo layout" plan: retire `src/` and update `README.md`
+  only once the new app reaches parity). Caught a real, separate bug
+  while in `backend/config/github.ts` for this: `GITHUB_APP_INSTALL_URL`'s
+  fallback pointed at `ethos-manual-translator`, a slug that was never
+  actually registered — the real App's slug is `ethos-manual-editor` (per
+  https://github.com/settings/apps/ethos-manual-editor). Never hit in
+  practice so far since the real `.env` already overrides it correctly,
+  but fixed the wrong default outright regardless.
 - **Image handling**: relative image `src`s resolve to real
   raw.githubusercontent.com URLs, replicating `mkdocs.yml`'s actual
   `i18n: fallback_to_default: true` config — a locale-specific screenshot

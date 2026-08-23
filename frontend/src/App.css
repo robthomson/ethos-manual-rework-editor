@@ -199,6 +199,26 @@
   font-size: 0.8rem;
 }
 
+.discard-button {
+  margin-left: auto;
+  font-size: 0.8rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid #cf222e;
+  border-radius: 4px;
+  background: white;
+  color: #cf222e;
+  cursor: pointer;
+}
+
+.discard-button:hover {
+  background: #fff0f0;
+}
+
+.discard-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .page-view-panes {
   display: flex;
   gap: 1rem;
@@ -233,6 +253,44 @@
   color: #555;
   margin-bottom: 0.3rem;
   flex-shrink: 0;
+  /* Both panes share this class specifically so they reserve the same
+     height regardless of which controls either one actually needs —
+     caught live: at a narrow-enough pane width (DevTools open, a
+     resized window), Rich mode's 7-button controls group (toggle +
+     formatting toolbar) wraps onto a second line while the English
+     side's plain 2-button toggle never does, silently reintroducing the
+     exact misalignment this row was built to fix in the first place.
+     min-height reserves enough for that worst-case wrapped state on
+     *both* sides unconditionally, so the box below always starts at the
+     same height even when one row's content only needs a single line. */
+  min-height: 3rem;
+}
+
+/* Groups the mode toggle and any mode-specific toolbar (Source's "Insert
+   image", Rich's Bold/Italic/Link/Image) into the one existing label
+   row instead of a row of their own — see this file's own EditablePageView
+   comment for why: an extra row inside the box misaligned that pane's
+   content start against the other side's. */
+.pane-label-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.pane-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.pane-toolbar button {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: white;
+  cursor: pointer;
 }
 
 .pane-mode-toggle {
@@ -519,8 +577,14 @@
 }
 
 .workspace-changes li {
+  display: flex;
+  align-items: center;
   padding: 0.15rem 0.3rem;
   border-radius: 4px;
+}
+
+.change-path {
+  flex: 1;
   word-break: break-all;
 }
 
@@ -535,6 +599,21 @@
 .workspace-changes li.active {
   background: #dbeafe;
   font-weight: 600;
+}
+
+.change-discard-btn {
+  background: none;
+  border: none;
+  color: #999;
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+  flex-shrink: 0;
+}
+
+.change-discard-btn:hover {
+  color: #cf222e;
 }
 
 .change-badge {
@@ -674,21 +753,6 @@
   border-radius: 4px;
 }
 
-.editor-toolbar {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.editor-toolbar button {
-  font-size: 0.8rem;
-  padding: 0.25rem 0.6rem;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background: white;
-  cursor: pointer;
-}
-
 /* WysiwygEditor.tsx (Milkdown) — element selectors rather than
    Milkdown's own wrapper class names, so this doesn't silently stop
    applying if those change across versions. Specifically
@@ -703,22 +767,6 @@
    contenteditable's mere *presence*, true or false, so this rule's own
    padding was landing on that inner false-marker span too, turning an
    otherwise perfectly ordinary single space into a visibly padded gap. */
-.wysiwyg-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-bottom: 0.5rem;
-}
-
-.wysiwyg-toolbar button {
-  font-size: 0.8rem;
-  padding: 0.25rem 0.6rem;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background: white;
-  cursor: pointer;
-}
-
 .wysiwyg-link-input {
   display: flex;
   align-items: center;

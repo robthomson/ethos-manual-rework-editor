@@ -603,3 +603,114 @@ export async function scanChanges(name: string): Promise<ChangeEntry[]> {
 
   return changes;
 }
+
+// Removes mdPath's own nav entry from the workspace's local mkdocs.yml —
+// the reverse of createNewPage()/createNewSection()'s own insertion.
+// Only ever called for a path that genuinely has no baseline (a page or
+// section created this session, never existed upstream at all) — see
+// discardChange() below. Handles both shapes a nav entry can be: a plain
+// child page inside some section's children, or a section's own landing
+// page (in which case the whole section — including any child entries
+// under it — is removed, not just the landing page by itself; a section
+// with pages already added under it is a known, deliberate scope cut,
+// same spirit as this file's other YAML-round-trip trade-offs — those
+// child pages' own working files aren't touched, so discarding the
+// section separately from discarding each child it contains can leave
+// their files on disk with no nav entry pointing at them any more).
+async function removeNavEntry(root: string, mdPath: string): Promise<void> {
+  const mkdocsWorking = mkdocsWorkingPath(root);
+  if (!(await fs.pathExists(mkdocsWorking))) return; // nothing to clean up
+
+  const rawYaml = await fs.readFile(mkdocsWorking, "utf8");
+  const config = (yaml.load(rawYaml) as Record<string, any>) || {};
+  const nav: any[] = Array.isArray(config.nav) ? config.nav : [];
+
+  const sectionIdx = nav.findIndex((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+    return Object.values(entry).some((value) => Array.isArray(value) && value[0] === mdPath);
+  });
+  if (sectionIdx !== -1) {
+    nav.splice(sectionIdx, 1);
+    config.nav = nav;
+    await saveWorkingMkdocsConfig(root, config);
+    return;
+  }
+
+  for (const entry of nav) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    for (const value of Object.values(entry)) {
+      if (!Array.isArray(value)) continue;
+      const childIdx = value.findIndex(
+        (c) => c && typeof c === "object" && !Array.isArray(c) && Object.values(c).includes(mdPath),
+      );
+      if (childIdx !== -1) {
+        value.splice(childIdx, 1);
+        config.nav = nav;
+        await saveWorkingMkdocsConfig(root, config);
+        return;
+      }
+    }
+  }
+}
+
+// Undoes one pending change (whatever scanChanges() above would report
+// for this exact path) rather than the whole workspace — asked for
+// directly: "what if we want to cancel changes to the page?". Three
+// distinct cases, keyed off what's actually on disk rather than trusting
+// a caller-supplied ChangeEntry.type (which labels an untranslated-
+// page's *first* translation "added" too, same as a genuinely new page —
+// see scanChanges()'s own comment — but those need completely different
+// discard behavior):
+//   1. An image (no baseline concept at all — see uploadImage()'s own
+//      comment): delete the uploaded file outright.
+//   2. A real per-page baseline exists (either a prior real translation,
+//      or the English-fallback text a first-time translation started
+//      from): overwrite the working copy with it — exactly what
+//      scanChanges() itself already treats as "no longer a change".
+//   3. No baseline at all: this page/section was created *this session*
+//      (createNewPage()/createNewSection() deliberately skip writing
+//      one) — undo the creation entirely: delete the file and remove
+//      its nav entry.
+export interface DiscardResult {
+  // true for cases 1 and 3 above (the file itself is gone — an upload,
+  // or a page/section that never existed upstream) — false for case 2
+  // (the page still exists, just reverted). workspaceRoutes.ts's own
+  // caller (frontend App.tsx) uses this to decide whether to keep
+  // showing the now-reverted page or fall back to "pick a page", since a
+  // discard's own {ok:true} alone can't tell those apart.
+  deleted: boolean;
+}
+
+export async function discardChange(name: string, mdPath: string): Promise<DiscardResult> {
+  if (mdPath === "mkdocs.yml") {
+    // Not a page — this shows up as its own "modified" entry only as a
+    // side effect of one or more new page/section creations, each
+    // independently discardable via case 3 above. Discarding it directly
+    // would revert *every* pending new-page/section's nav entry at once
+    // while leaving their own working files behind, orphaned — safer to
+    // just not support this as its own target.
+    throw new WorkspaceError('Discard the new page/section itself, not "mkdocs.yml" directly.');
+  }
+  if (!isSafeRelativePath(mdPath)) throw new WorkspaceError(`Invalid path "${mdPath}".`);
+
+  const meta = await readMeta(name);
+  const root = workspaceRoot(name);
+
+  if (IMAGE_EXTENSIONS.test(mdPath)) {
+    await fs.remove(path.join(root, docsPath(meta.locale, mdPath)));
+    return { deleted: true };
+  }
+
+  const workingPath = workingCopyPath(root, meta.locale, mdPath);
+  const baseline = baselinePath(root, meta.locale, mdPath);
+
+  if (await fs.pathExists(baseline)) {
+    const original = await fs.readFile(baseline, "utf8");
+    await fs.writeFile(workingPath, original, "utf8");
+    return { deleted: false };
+  }
+
+  await fs.remove(workingPath);
+  await removeNavEntry(root, mdPath);
+  return { deleted: true };
+}

@@ -54,25 +54,17 @@
  *   addressed (remark-stringify's default `bullet` option; Milkdown
  *   likely exposes overriding it, not yet investigated).
  *
- *   Formatting toolbar (Bold/Italic/Link/Image): each button calls the
- *   relevant preset-commonmark command from *outside* the ProseMirror
- *   view via `editor.action(callCommand(command.key, payload))` — the
- *   documented Milkdown pattern for triggering a command from ordinary
- *   React UI rather than a keymap. No "justify"/text-align button:
- *   CommonMark (and this repo's own pymdownx extension list) has no
- *   text-alignment concept at all, so there's nothing meaningful for a
- *   button to write into the saved markdown. Each toolbar `<button>`
- *   preventDefault()s on mousedown (not click) — without it, the browser
- *   shifts focus to the button before the click handler runs, collapsing
- *   whatever selection the command needs to act on. Link opens a small
- *   inline URL field in the toolbar itself rather than a floating
- *   popover (simpler, no selection-relative positioning to get right,
- *   and consistent with this app's existing modal-for-input pattern
- *   elsewhere). Image reuses AddImageModal.tsx — the exact same
- *   upload/list-existing flow Source mode's own "Insert image" button
- *   uses — but inserts via `insertImageCommand` at the live ProseMirror
- *   selection instead of splicing the plain-text textarea value the way
- *   EditablePageView.tsx's own handleImageUploaded() does.
+ *   Formatting commands (Bold/Italic/Link/Image) are exposed via an
+ *   imperative handle (WysiwygEditorHandle) rather than rendered as a
+ *   toolbar *inside* this component — caught live: a self-contained
+ *   toolbar here added its own row inside the bordered/scrollable box,
+ *   which made the box start lower on the Rich-mode side than the
+ *   English reference pane's own box on the same row. EditablePageView.tsx
+ *   owns the actual buttons, in its shared pane-label row (same one the
+ *   Rich/Source/Preview toggle already lives in), and calls these methods
+ *   via the ref — this file only supplies what needs the live ProseMirror
+ *   instance (`get()`), via the same `editor.action(callCommand(command.key,
+ *   payload))` pattern as before.
  *
  *   The editor instance is created once per mount (empty `deps` to
  *   useEditor) with the *initial* content baked in via defaultValueCtx —
@@ -90,7 +82,7 @@
  *   resolved, so it's safe to close over without needing a
  *   replaceAll-style update path.
  */
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { Editor, rootCtx, defaultValueCtx } from "@milkdown/kit/core";
 import { commonmark } from "@milkdown/kit/preset/commonmark";
@@ -110,8 +102,13 @@ import {
   resolveImageSrc,
   type ImageResolutionContext,
 } from "../preview/imageResolver";
-import { AddImageModal } from "../components/AddImageModal";
-import { relativeAssetPath } from "../utils/relativePath";
+
+export interface WysiwygEditorHandle {
+  toggleBold: () => void;
+  toggleItalic: () => void;
+  applyLink: (href: string) => void;
+  insertImage: (src: string, alt: string) => void;
+}
 
 interface WysiwygEditorProps {
   content: string;
@@ -126,9 +123,10 @@ interface EditorInnerProps {
   content: string;
   onChange: (markdown: string) => void;
   imageCtx: ImageResolutionContext;
+  handleRef: React.Ref<WysiwygEditorHandle>;
 }
 
-function EditorInner({ content, onChange, imageCtx }: EditorInnerProps) {
+function EditorInner({ content, onChange, imageCtx, handleRef }: EditorInnerProps) {
   // Refs, not state — markdownUpdated's callback closure is captured
   // once at editor-creation time (deps: []), so it needs a stable way to
   // reach the *current* onChange/content without stale-closure issues.
@@ -183,114 +181,28 @@ function EditorInner({ content, onChange, imageCtx }: EditorInnerProps) {
     editor.action(replaceAll(content));
   }, [content, get]);
 
-  const [linkOpen, setLinkOpen] = useState(false);
-  const [linkValue, setLinkValue] = useState("");
-  const [showImageModal, setShowImageModal] = useState(false);
-  const [existingImageNames, setExistingImageNames] = useState<string[]>([]);
-  const linkInputRef = useRef<HTMLInputElement>(null);
-
-  // mousedown (not click) preventDefault — without it, the browser shifts
-  // focus to the button before the click handler runs, collapsing
-  // whatever text selection toggleStrongCommand/toggleEmphasisCommand/
-  // toggleLinkCommand need to know what to wrap. Each command already
-  // no-ops safely on its own when it isn't applicable (e.g. Bold with
-  // nothing selected just arms the mark for the next typed character,
-  // same as any other rich-text editor) — no extra guard needed here.
-  function toolbarMouseDown(e: MouseEvent) {
-    e.preventDefault();
-  }
-
   function runCommand(command: Parameters<typeof callCommand>[0], payload?: unknown) {
     get()?.action(callCommand(command as any, payload));
   }
 
-  function openLinkInput() {
-    setLinkValue("");
-    setLinkOpen(true);
-    // Focus after the input actually mounts.
-    setTimeout(() => linkInputRef.current?.focus(), 0);
-  }
-
-  function applyLink() {
-    const href = linkValue.trim();
-    if (href) runCommand(toggleLinkCommand.key, { href });
-    setLinkOpen(false);
-  }
-
-  async function openImageModal() {
-    if (imageCtx.workspace) {
-      try {
-        const res = await fetch(`/api/workspace/${encodeURIComponent(imageCtx.workspace)}/images`);
-        const data: { images?: string[] } = await res.json();
-        setExistingImageNames(data.images || []);
-      } catch {
-        setExistingImageNames([]);
-      }
-    }
-    setShowImageModal(true);
-  }
-
-  function handleImageUploaded(filename: string) {
-    const src = relativeAssetPath(imageCtx.mdPath, `assets/${filename}`);
-    const alt = filename.replace(/\.[a-z0-9]+$/i, "");
-    runCommand(insertImageCommand.key, { src, alt });
-    setShowImageModal(false);
-  }
-
-  return (
-    <>
-      <div className="wysiwyg-toolbar">
-        <button type="button" onMouseDown={toolbarMouseDown} onClick={() => runCommand(toggleStrongCommand.key)} title="Bold">
-          <strong>B</strong>
-        </button>
-        <button type="button" onMouseDown={toolbarMouseDown} onClick={() => runCommand(toggleEmphasisCommand.key)} title="Italic">
-          <em>i</em>
-        </button>
-        {linkOpen ? (
-          <span className="wysiwyg-link-input">
-            <input
-              ref={linkInputRef}
-              type="text"
-              placeholder="https://…"
-              value={linkValue}
-              onChange={(e) => setLinkValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") applyLink();
-                if (e.key === "Escape") setLinkOpen(false);
-              }}
-            />
-            <button type="button" onMouseDown={toolbarMouseDown} onClick={applyLink}>
-              Apply
-            </button>
-            <button type="button" onMouseDown={toolbarMouseDown} onClick={() => setLinkOpen(false)}>
-              Cancel
-            </button>
-          </span>
-        ) : (
-          <button type="button" onMouseDown={toolbarMouseDown} onClick={openLinkInput} title="Link">
-            Link
-          </button>
-        )}
-        {imageCtx.workspace && (
-          <button type="button" onMouseDown={toolbarMouseDown} onClick={openImageModal} title="Insert image">
-            Image
-          </button>
-        )}
-      </div>
-      <Milkdown />
-      {showImageModal && imageCtx.workspace && (
-        <AddImageModal
-          workspace={imageCtx.workspace}
-          existingNames={existingImageNames}
-          onClose={() => setShowImageModal(false)}
-          onUploaded={handleImageUploaded}
-        />
-      )}
-    </>
+  useImperativeHandle(
+    handleRef,
+    () => ({
+      toggleBold: () => runCommand(toggleStrongCommand.key),
+      toggleItalic: () => runCommand(toggleEmphasisCommand.key),
+      applyLink: (href: string) => runCommand(toggleLinkCommand.key, { href }),
+      insertImage: (src: string, alt: string) => runCommand(insertImageCommand.key, { src, alt }),
+    }),
+    [get],
   );
+
+  return <Milkdown />;
 }
 
-export function WysiwygEditor({ content, onChange, branch, locale, mdPath, workspace }: WysiwygEditorProps) {
+export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>(function WysiwygEditor(
+  { content, onChange, branch, locale, mdPath, workspace },
+  ref,
+) {
   const [imageCtx, setImageCtx] = useState<ImageResolutionContext | null>(null);
 
   useEffect(() => {
@@ -309,7 +221,7 @@ export function WysiwygEditor({ content, onChange, branch, locale, mdPath, works
 
   return (
     <MilkdownProvider>
-      <EditorInner content={content} onChange={onChange} imageCtx={imageCtx} />
+      <EditorInner content={content} onChange={onChange} imageCtx={imageCtx} handleRef={ref} />
     </MilkdownProvider>
   );
-}
+});

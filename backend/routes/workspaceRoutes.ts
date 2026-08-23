@@ -3,8 +3,9 @@
  * Description of responsibility:
  *   The local-workspace editing API: create/list/delete a workspace,
  *   open a page for editing (materializing it locally on first open —
- *   see workspaceStore.ts), save it, and scan which pages have actually
- *   changed. Deliberately requires no GitHub sign-in at all — see
+ *   see workspaceStore.ts), save it, scan which pages have actually
+ *   changed, and discard one pending change back to its starting point.
+ *   Deliberately requires no GitHub sign-in at all — see
  *   workspaceStore.ts's header comment for why that's the right call
  *   for a single-user desktop install, unlike docEditor's own
  *   login-gated workspace routes.
@@ -29,6 +30,7 @@ import {
   ensurePageMaterialized,
   savePage,
   scanChanges,
+  discardChange,
   createNewPage,
   createNewSection,
   listWorkspaceImages,
@@ -214,6 +216,21 @@ router.get("/:name/images/:filename", async (req, res) => {
 router.get("/:name/changes", async (req, res) => {
   try {
     res.json({ changes: await scanChanges(req.params.name) });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// Undoes one pending change — see discardChange()'s own comment for the
+// three cases (an uploaded image, a real edit to an existing/translated
+// page, or a page/section created this session) it handles.
+router.post("/:name/discard", async (req, res) => {
+  const { path: mdPath } = req.body || {};
+  if (!mdPath) return res.status(400).json({ error: "Missing path" });
+
+  try {
+    const result = await discardChange(req.params.name, mdPath);
+    res.json({ ok: true, ...result });
   } catch (err) {
     handleError(res, err);
   }

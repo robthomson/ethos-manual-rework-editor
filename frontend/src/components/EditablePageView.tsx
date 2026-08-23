@@ -37,20 +37,41 @@
  *   it's safe to, since that's the actual point of building it; Source
  *   otherwise.
  *
- *   "Insert image" captures the textarea's cursor position (selectionStart)
- *   BEFORE the modal opens — opening it moves focus away from the
- *   textarea, and reading selectionStart afterward would just see
- *   wherever focus last was instead of where the user actually clicked.
- *   Only wired up for Source mode so far — inserting at a Rich-mode
- *   (ProseMirror) cursor position needs different plumbing, not yet
- *   built.
+ *   The English reference pane also has its own Source/Preview toggle
+ *   (EnglishModeToggle) — this editing view never had one at all before,
+ *   unlike PageView.tsx's read-only browsing view, which already toggles
+ *   both its panes independently. Always locale="en" for its own
+ *   MarkdownPreview call regardless of which locale is actually being
+ *   translated, matching PageView.tsx's own English-preview call.
+ *
+ *   Both panes' mode-toggle rows share one layout (page-view-pane-label,
+ *   a "label text + controls" flex row) specifically so their bordered/
+ *   scrollable content boxes always start at the same height — caught
+ *   live: the Rich-mode formatting toolbar and Source mode's own
+ *   "Insert image" button used to render as an extra row *inside* the
+ *   box, pushing that side's content down further than the English
+ *   pane's, which never had one. Both now live in the label row itself
+ *   (in `.pane-label-controls`, alongside the mode toggle), so every
+ *   mode combination keeps exactly one header row per pane, regardless
+ *   of which controls that mode needs.
+ *
+ *   Image insertion is unified across modes: Source mode captures the
+ *   textarea's cursor position (selectionStart) *before* the modal opens
+ *   (opening it moves focus away, and reading selectionStart afterward
+ *   would just see wherever focus last was) and splices the markdown
+ *   reference in at that offset. Rich mode doesn't need that capture at
+ *   all — ProseMirror keeps its own selection in its data model
+ *   independent of DOM focus, so `WysiwygEditorHandle.insertImage()`
+ *   (called on the ref WysiwygEditor.tsx now exposes) inserts at
+ *   whatever the live selection still is, even after the modal stole
+ *   focus. Bold/Italic/Link work the same way, via the same ref.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { MarkdownPreview } from "../preview/renderMarkdown";
 import { AddImageModal } from "./AddImageModal";
 import { relativeAssetPath } from "../utils/relativePath";
 import { containsPymdownxBlocks } from "../preview/pymdownxBlocks";
-import { WysiwygEditor } from "../wysiwyg/WysiwygEditor";
+import { WysiwygEditor, type WysiwygEditorHandle } from "../wysiwyg/WysiwygEditor";
 
 interface EditablePageData {
   content: string;
@@ -59,6 +80,32 @@ interface EditablePageData {
 }
 
 type PaneMode = "source" | "rich" | "preview";
+type EnglishPaneMode = "source" | "preview";
+
+// The English reference pane is read-only (never edited — see this
+// file's header comment) but still benefits from the same rendered-vs-
+// raw toggle PageView.tsx's own read-only browsing view already has for
+// both its panes; this editing view just never had it for English.
+// Named/typed separately from the 3-way PaneModeToggle below (which
+// also offers Rich) rather than trying to reuse it for a 2-way case.
+function EnglishModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: EnglishPaneMode;
+  onChange: (m: EnglishPaneMode) => void;
+}) {
+  return (
+    <div className="pane-mode-toggle">
+      <button className={mode === "source" ? "active" : ""} onClick={() => onChange("source")}>
+        Source
+      </button>
+      <button className={mode === "preview" ? "active" : ""} onClick={() => onChange("preview")}>
+        Preview
+      </button>
+    </div>
+  );
+}
 
 function PaneModeToggle({
   mode,
@@ -100,7 +147,9 @@ interface EditablePageViewProps {
   localeName: string;
   mdPath: string;
   title: string;
+  hasChange: boolean;
   onSaved: () => void;
+  onDiscard: () => Promise<{ ok: boolean; error?: string }>;
 }
 
 export function EditablePageView({
@@ -110,7 +159,9 @@ export function EditablePageView({
   localeName,
   mdPath,
   title,
+  hasChange,
   onSaved,
+  onDiscard,
 }: EditablePageViewProps) {
   const [englishSource, setEnglishSource] = useState<string | null>(null);
   const [content, setContent] = useState("");
@@ -119,8 +170,12 @@ export function EditablePageView({
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState<PaneMode>("source");
+  const [englishMode, setEnglishMode] = useState<EnglishPaneMode>("source");
   const [showImageModal, setShowImageModal] = useState(false);
   const [existingImageNames, setExistingImageNames] = useState<string[]>([]);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkValue, setLinkValue] = useState("");
+  const [discarding, setDiscarding] = useState(false);
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Guards against saving stale content from a page that's since been
@@ -130,8 +185,11 @@ export function EditablePageView({
   const currentKeyRef = useRef<string>("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Captured when "Insert image" is clicked, before the modal (which
-  // steals focus) opens — see this file's header comment.
+  // steals focus) opens — only meaningful for Source mode, see this
+  // file's header comment for why Rich mode needs no equivalent.
   const insertCursorRef = useRef<number>(0);
+  const wysiwygRef = useRef<WysiwygEditorHandle>(null);
+  const linkInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -222,6 +280,27 @@ export function EditablePageView({
     }, 1200);
   }
 
+  async function handleDiscard() {
+    if (!window.confirm(`Discard all local changes to "${title}"? This can't be undone.`)) return;
+    setDiscarding(true);
+    const result = await onDiscard();
+    setDiscarding(false);
+    if (!result.ok) window.alert(result.error || "Couldn't discard changes — please try again.");
+    // On success, App.tsx's own discardPageChange() already decides what
+    // happens to this view (reload the now-reverted content, or clear
+    // the selection entirely if the page was deleted) — nothing left to
+    // do here either way.
+  }
+
+  function toolbarMouseDown(e: MouseEvent) {
+    // Without this, the browser shifts DOM focus to the button before the
+    // click handler runs — harmless for Rich mode (ProseMirror keeps its
+    // own selection regardless of DOM focus), but Source mode's plain
+    // textarea would lose its cursor position the same way "Insert image"
+    // already has to guard against below.
+    e.preventDefault();
+  }
+
   async function openImageModal() {
     insertCursorRef.current = textareaRef.current?.selectionStart ?? content.length;
     try {
@@ -236,10 +315,27 @@ export function EditablePageView({
 
   function handleImageUploaded(filename: string) {
     const ref = relativeAssetPath(mdPath, `assets/${filename}`);
-    const markdown = `![${filename.replace(/\.[a-z0-9]+$/i, "")}](${ref})`;
-    const offset = insertCursorRef.current;
-    const next = content.slice(0, offset) + markdown + content.slice(offset);
-    handleChange(next);
+    const alt = filename.replace(/\.[a-z0-9]+$/i, "");
+    if (effectiveMode === "rich") {
+      wysiwygRef.current?.insertImage(ref, alt);
+    } else {
+      const markdown = `![${alt}](${ref})`;
+      const offset = insertCursorRef.current;
+      handleChange(content.slice(0, offset) + markdown + content.slice(offset));
+    }
+    setShowImageModal(false);
+  }
+
+  function openLinkInput() {
+    setLinkValue("");
+    setLinkOpen(true);
+    setTimeout(() => linkInputRef.current?.focus(), 0);
+  }
+
+  function applyLink() {
+    const href = linkValue.trim();
+    if (href) wysiwygRef.current?.applyLink(href);
+    setLinkOpen(false);
   }
 
   if (loading) return <div className="page-view-loading">Loading {title}…</div>;
@@ -260,26 +356,97 @@ export function EditablePageView({
         {saveState === "saving" && <span className="save-indicator">Saving…</span>}
         {saveState === "saved" && <span className="save-indicator saved">Saved locally</span>}
         {saveState === "error" && <span className="save-indicator error">Save failed</span>}
+        {hasChange && (
+          <button className="discard-button" disabled={discarding} onClick={handleDiscard}>
+            {discarding ? "Discarding…" : "Discard changes"}
+          </button>
+        )}
       </div>
 
       <div className="page-view-panes">
         <div className="page-view-pane">
-          <div className="page-view-pane-label">English (source)</div>
-          <textarea readOnly value={englishSource ?? ""} />
+          <div className="page-view-pane-label">
+            <span>English (source)</span>
+            <div className="pane-label-controls">
+              <EnglishModeToggle mode={englishMode} onChange={setEnglishMode} />
+            </div>
+          </div>
+          {englishMode === "source" ? (
+            <textarea readOnly value={englishSource ?? ""} />
+          ) : (
+            <div className="preview-scroll">
+              <MarkdownPreview content={englishSource ?? ""} branch={branch} locale="en" mdPath={mdPath} />
+            </div>
+          )}
         </div>
         <div className="page-view-pane">
           <div className="page-view-pane-label">
-            {localeName} (editing)
-            <PaneModeToggle mode={effectiveMode} onChange={setEditMode} richDisabled={richDisabled} />
-          </div>
-          {effectiveMode === "source" && (
-            <div className="editor-toolbar">
-              <button onClick={openImageModal}>Insert image</button>
+            <span>
+              {localeName} (editing)
+            </span>
+            <div className="pane-label-controls">
+              <PaneModeToggle mode={effectiveMode} onChange={setEditMode} richDisabled={richDisabled} />
+              {effectiveMode === "source" && (
+                <div className="pane-toolbar">
+                  <button type="button" onMouseDown={toolbarMouseDown} onClick={openImageModal}>
+                    Insert image
+                  </button>
+                </div>
+              )}
+              {effectiveMode === "rich" && (
+                <div className="pane-toolbar">
+                  <button
+                    type="button"
+                    onMouseDown={toolbarMouseDown}
+                    onClick={() => wysiwygRef.current?.toggleBold()}
+                    title="Bold"
+                  >
+                    <strong>B</strong>
+                  </button>
+                  <button
+                    type="button"
+                    onMouseDown={toolbarMouseDown}
+                    onClick={() => wysiwygRef.current?.toggleItalic()}
+                    title="Italic"
+                  >
+                    <em>i</em>
+                  </button>
+                  {linkOpen ? (
+                    <span className="wysiwyg-link-input">
+                      <input
+                        ref={linkInputRef}
+                        type="text"
+                        placeholder="https://…"
+                        value={linkValue}
+                        onChange={(e) => setLinkValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") applyLink();
+                          if (e.key === "Escape") setLinkOpen(false);
+                        }}
+                      />
+                      <button type="button" onMouseDown={toolbarMouseDown} onClick={applyLink}>
+                        Apply
+                      </button>
+                      <button type="button" onMouseDown={toolbarMouseDown} onClick={() => setLinkOpen(false)}>
+                        Cancel
+                      </button>
+                    </span>
+                  ) : (
+                    <button type="button" onMouseDown={toolbarMouseDown} onClick={openLinkInput} title="Link">
+                      Link
+                    </button>
+                  )}
+                  <button type="button" onMouseDown={toolbarMouseDown} onClick={openImageModal} title="Insert image">
+                    Image
+                  </button>
+                </div>
+              )}
             </div>
-          )}
+          </div>
           {effectiveMode === "rich" ? (
             <div className="wysiwyg-scroll">
               <WysiwygEditor
+                ref={wysiwygRef}
                 content={content}
                 onChange={handleChange}
                 branch={branch}

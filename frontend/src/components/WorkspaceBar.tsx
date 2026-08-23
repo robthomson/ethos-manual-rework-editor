@@ -22,8 +22,18 @@
  *   knowing anything about nav structure itself. `selectedPath` mirrors
  *   NavTree's own "active" highlighting, so a change opened from here
  *   reads as selected here too, not just in the nav tree above it.
+ *
+ *   Each entry also has its own discard ("↺") button, independent of
+ *   whether that page happens to be the one currently open — App.tsx's
+ *   discardPageChange() is the same one EditablePageView.tsx's own
+ *   "Discard changes" button calls, just targeting a possibly-different
+ *   path. Confirms first (unlike onDelete's own workspace-deletion
+ *   button below, which doesn't) since this can throw away real,
+ *   possibly-substantial translation work, not just an empty workspace
+ *   shell. stopPropagation so clicking it doesn't also trigger the row's
+ *   own onSelectChange and open the page you're discarding.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import type { ChangeEntry, WorkspaceMeta } from "../hooks/useWorkspace";
 
 interface WorkspaceBarProps {
@@ -34,6 +44,7 @@ interface WorkspaceBarProps {
   onDelete: (name: string) => void;
   changes: ChangeEntry[];
   onSelectChange: (mdPath: string) => void;
+  onDiscardChange: (mdPath: string) => Promise<{ ok: boolean; error?: string }>;
   selectedPath: string | null;
   createError: string | null;
   branch: string;
@@ -49,6 +60,7 @@ export function WorkspaceBar({
   onDelete,
   changes,
   onSelectChange,
+  onDiscardChange,
   selectedPath,
   createError,
   branch,
@@ -77,6 +89,13 @@ export function WorkspaceBar({
       setShowNew(false);
       setName("");
     }
+  }
+
+  async function handleDiscardClick(e: MouseEvent, mdPath: string) {
+    e.stopPropagation();
+    if (!window.confirm(`Discard local changes to "${mdPath}"? This can't be undone.`)) return;
+    const result = await onDiscardChange(mdPath);
+    if (!result.ok) window.alert(result.error || "Couldn't discard changes — please try again.");
   }
 
   return (
@@ -145,7 +164,14 @@ export function WorkspaceBar({
                 onClick={() => onSelectChange(c.path)}
               >
                 <span className={`change-badge change-${c.type}`}>{c.type === "added" ? "+" : "~"}</span>
-                {c.path}
+                <span className="change-path">{c.path}</span>
+                <button
+                  className="change-discard-btn"
+                  title="Discard changes to this page"
+                  onClick={(e) => handleDiscardClick(e, c.path)}
+                >
+                  ↺
+                </button>
               </li>
             ))}
           </ul>

@@ -24,7 +24,7 @@
  *   navigating away and back) within the same session, without
  *   pretending the backend's own view of the nav has changed.
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 export interface NavPage {
   title: string;
@@ -57,35 +57,34 @@ export function useNav() {
       .catch(() => setError("Couldn't reach the backend."));
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
+  // Wrapped in useCallback (not just an effect) so refreshToc() below can
+  // re-run the exact same fetch on demand — needed after discardChange()
+  // deletes a page/section created this session, since that's the
+  // backend's own view of the nav actually changing, unlike
+  // addLocalPage()/addLocalSection()'s client-side-only splice.
+  const loadToc = useCallback(async () => {
     setLoading(true);
     setError(null);
-
-    fetch(`/api/nav/toc?branch=${encodeURIComponent(branch)}&locale=${encodeURIComponent(locale)}`)
-      .then((res) => res.json())
-      .then((data: { locales?: Record<string, string>; toc?: NavPage[]; error?: string }) => {
-        if (cancelled) return;
-        if (data.error) {
-          setError(data.error);
-          setLoading(false);
-          return;
-        }
-        setLocales(data.locales || { en: "English" });
-        setToc(data.toc || []);
+    try {
+      const res = await fetch(`/api/nav/toc?branch=${encodeURIComponent(branch)}&locale=${encodeURIComponent(locale)}`);
+      const data: { locales?: Record<string, string>; toc?: NavPage[]; error?: string } = await res.json();
+      if (data.error) {
+        setError(data.error);
         setLoading(false);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setError("Couldn't reach the backend.");
-          setLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
+        return;
+      }
+      setLocales(data.locales || { en: "English" });
+      setToc(data.toc || []);
+      setLoading(false);
+    } catch {
+      setError("Couldn't reach the backend.");
+      setLoading(false);
+    }
   }, [branch, locale]);
+
+  useEffect(() => {
+    loadToc();
+  }, [loadToc]);
 
   // Appends a new leaf under the named top-level section — matches
   // backend/workspaceStore.ts:createNewPage()'s own "top-level section,
@@ -120,5 +119,6 @@ export function useNav() {
     error,
     addLocalPage,
     addLocalSection,
+    refreshToc: loadToc,
   };
 }
