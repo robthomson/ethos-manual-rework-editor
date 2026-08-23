@@ -47,12 +47,19 @@
  *   Verified end-to-end (headings, bold/italic, links, lists, a GFM
  *   table, a real blockquote, a fenced code block) against a real
  *   running instance: renders as genuine rich text, and round-trips
- *   back to correct markdown. One confirmed, minor, cosmetic
- *   difference: bullet lists round-trip using `*` markers regardless of
- *   whether the source used `-` — stylistically different, not
- *   incorrect, but will show as a no-op diff line in a real PR if not
- *   addressed (remark-stringify's default `bullet` option; Milkdown
- *   likely exposes overriding it, not yet investigated).
+ *   back to correct markdown.
+ *
+ *   Bullet marker fixed to "-" (see `remarkStringifyOptionsCtx` below) —
+ *   caught live in an actual submitted PR: remark-stringify's own
+ *   default (`*`) rewrote every existing `-` bullet in a list the
+ *   moment any one line in it changed, turning a one-word edit into an
+ *   8-line diff of pure noise. `remarkStringifyOptionsCtx` is a real
+ *   Milkdown ctx slice (confirmed by reading @milkdown/core's own
+ *   source: `init.ts` builds the actual serializer as
+ *   `unified().use(remarkParse).use(remarkStringify, ctx.get(remarkStringifyOptionsCtx))`,
+ *   and preset-commonmark's own emphasis/strong nodes already read
+ *   `.emphasis`/`.strong` off the same slice for their own marker
+ *   choice) — not a guess past an undocumented gap.
  *
  *   Formatting commands (Bold/Italic/Link/Image) are exposed via an
  *   imperative handle (WysiwygEditorHandle) rather than rendered as a
@@ -84,7 +91,7 @@
  */
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
-import { Editor, rootCtx, defaultValueCtx } from "@milkdown/kit/core";
+import { Editor, rootCtx, defaultValueCtx, remarkStringifyOptionsCtx } from "@milkdown/kit/core";
 import { commonmark } from "@milkdown/kit/preset/commonmark";
 import {
   imageSchema,
@@ -159,6 +166,13 @@ function EditorInner({ content, onChange, imageCtx, handleRef }: EditorInnerProp
       .config((ctx) => {
         ctx.set(rootCtx, root);
         ctx.set(defaultValueCtx, content);
+        // remark-stringify's own default is "*" — caught live in a real
+        // submitted PR: a one-word edit inside a bullet list produced an
+        // 8-line diff, every existing "-" bullet rewritten to "*" for no
+        // real reason. This repo's own convention (and CommonMark's, and
+        // every other markdown file in it) is "-", so match it instead of
+        // the library default.
+        ctx.update(remarkStringifyOptionsCtx, (prev) => ({ ...prev, bullet: "-" as const }));
         ctx.get(listenerCtx).markdownUpdated((_ctx, markdown, prevMarkdown) => {
           if (markdown === prevMarkdown) return;
           lastContentRef.current = markdown;

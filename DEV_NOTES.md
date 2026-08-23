@@ -87,10 +87,8 @@ repo:**
   first rather than HTML-first): type directly into formatted text for
   headings, bold/italic, lists, links, images, code, GFM tables — no
   visible markdown syntax. Verified end-to-end against a real running
-  instance: renders correctly *and* round-trips back to valid markdown
-  (one confirmed cosmetic-only difference: bullets round-trip as `*`
-  regardless of source style — see "Known trade-offs" below). **Safety-
-  gated**: pages containing pymdownx blocks (admonitions/details/tabs)
+  instance: renders correctly *and* round-trips back to valid markdown.
+  **Safety-gated**: pages containing pymdownx blocks (admonitions/details/tabs)
   stay in Source mode — see "pymdownx blocks in Rich mode" below for why
   this isn't just a missing feature but an active data-loss risk if
   skipped. Each editing pane is now a three-way Rich/Source/Preview
@@ -278,6 +276,21 @@ repo:**
   edit, producing
   [PR #3](https://github.com/robthomson/ethos-manual-rework/pull/3) — a
   single-file, correctly-scoped diff with `translated_from:` intact.
+- **Rich-mode bullet marker fixed to `-`** (`WysiwygEditor.tsx`) —
+  remark-stringify's own default (`*`) rewrote every existing `-` bullet
+  in a list the moment any one line in it changed, since Milkdown
+  serializes the *whole* list node, not just the touched line. Caught
+  live in [PR #3](https://github.com/robthomson/ethos-manual-rework/pull/3)
+  itself: a one-word edit produced an 8-line diff of pure bullet-marker
+  noise. Fixed via `remarkStringifyOptionsCtx` — a real Milkdown ctx
+  slice (confirmed by reading `@milkdown/core`'s own source:
+  `init.ts` builds the actual serializer as
+  `unified().use(remarkParse).use(remarkStringify, ctx.get(remarkStringifyOptionsCtx))`,
+  and preset-commonmark's own emphasis/strong nodes already read
+  `.emphasis`/`.strong` off that same slice for their own marker
+  choice — not a guess past an undocumented gap). Verified against a
+  real running instance: every bullet in a real translated list now
+  round-trips as `-`.
 
 **Not built yet:**
 - **Custom nodes for pymdownx blocks in Rich mode** (admonitions/details/
@@ -426,12 +439,6 @@ sign-in doesn't buy you.
   style changes) rather than a clean one-line diff. Fix would be a
   line-based/text-surgery insertion instead of parse+dump — meaningfully
   more engineering, deliberately deferred.
-- **WYSIWYG bullet-marker style.** Round-tripping a bullet list through
-  Rich mode always emits `*` markers, regardless of whether the source
-  used `-` — confirmed via direct testing. Cosmetic only (both are valid
-  CommonMark), but will show as a no-op diff line in a real PR if a
-  translator's edit touches an existing bulleted list. Likely fixable via
-  a remark-stringify option Milkdown exposes; not yet investigated.
 - **Preview fidelity, deliberate cuts** (same "behavior over pixel
   parity" spirit as the old `preview.py`):
   - `remark-gfm` also enables strikethrough/autolink/tasklist, which
