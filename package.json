@@ -1,0 +1,56 @@
+{
+  "name": "ethos-manual-editor",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Ethos Manual Editor (Electron rewrite)",
+  "author": {
+    "name": "Rob Thomson",
+    "email": "rob@rt-rc.com"
+  },
+  "main": "electron/dist/main.js",
+  "scripts": {
+    "dev": "concurrently -n backend,frontend,electron -c blue,green,magenta \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\" \"npm run electron:dev\"",
+    "build:frontend": "npm --prefix frontend run build",
+    "build:backend": "npm --prefix backend run build",
+    "build:electron": "tsc -p electron",
+    "build": "npm run build:frontend && npm run build:backend && npm run build:electron",
+    "electron:dev": "npm run build:electron && electron .",
+    "electron:start": "electron .",
+    "dist": "npm run build && electron-builder"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.9.3",
+    "@types/node": "^24.10.1"
+  },
+  "build": {
+    "appId": "com.robthomson.ethosmanualeditor",
+    "productName": "Ethos Manual Editor",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      { "from": "backend/dist", "to": "backend/dist" },
+      { "from": "backend/node_modules", "to": "backend/node_modules" },
+      { "from": "backend/package.json", "to": "backend/package.json" },
+      { "from": "frontend/dist", "to": "frontend/dist" },
+      { "from": "electron/icon.ico", "to": "electron/icon.ico" }
+    ],
+    "win": { "target": "nsis", "icon": "electron/icon.ico" },
+    "nsis": {
+      "artifactName": "${productName} Setup ${version}-${arch}.${ext}"
+    },
+    "mac": { "target": "dmg" },
+    "linux": {
+      "target": ["AppImage", "tar.gz"],
+      "icon": "electron/icon.png",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    }
+  }
+}
