@@ -118,7 +118,7 @@ export class GitHubAppNotInstalledError extends Error {
   installUrl: string;
   constructor(installUrl: string) {
     super(
-      "GitHub blocked this action — the Ethos Manual Translator GitHub " +
+      "GitHub blocked this action — the Ethos Manual Editor GitHub " +
         "App either isn't installed for this account yet, or is installed " +
         "without the permissions this needs. Install it (or approve a " +
         "pending install request) before this will work.",

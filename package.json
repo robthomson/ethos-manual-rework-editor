@@ -1,8 +1,8 @@
 {
-  "name": "ethos-manual-translator",
+  "name": "ethos-manual-editor",
   "version": "0.2.0",
   "private": true,
-  "description": "Ethos Manual Translator (Electron rewrite)",
+  "description": "Ethos Manual Editor (Electron rewrite)",
   "main": "electron/dist/main.js",
   "scripts": {
     "dev": "concurrently -n backend,frontend,electron -c blue,green,magenta \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\" \"npm run electron:dev\"",
@@ -22,8 +22,8 @@
     "@types/node": "^24.10.1"
   },
   "build": {
-    "appId": "com.robthomson.ethosmanualtranslator",
-    "productName": "Ethos Manual Translator",
+    "appId": "com.robthomson.ethosmanualeditor",
+    "productName": "Ethos Manual Editor",
     "directories": {
       "output": "release"
     },

@@ -2,7 +2,7 @@
   "name": "backend",
   "version": "0.2.0",
   "private": true,
-  "description": "Ethos Manual Translator backend (Express)",
+  "description": "Ethos Manual Editor backend (Express)",
   "main": "dist/server.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only server.ts",

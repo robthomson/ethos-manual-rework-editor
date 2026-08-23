@@ -36,4 +36,11 @@ if (!GITHUB_CLIENT_ID) {
 // approve it there), same as docEditor's own GITHUB_APP_INSTALL_URL.
 export const GITHUB_APP_INSTALL_URL =
   process.env.GITHUB_APP_INSTALL_URL ||
-  "https://github.com/apps/ethos-manual-translator/installations/new";
+  // The real registered App's slug is "ethos-manual-editor" (confirmed
+  // against https://github.com/settings/apps/ethos-manual-editor) — this
+  // fallback previously said "ethos-manual-translator", a slug that was
+  // never actually registered, so it would have 404ed for anyone running
+  // without GITHUB_APP_INSTALL_URL set in their own .env. Never hit in
+  // practice so far since the real .env already overrides it correctly,
+  // but a wrong default is still worth fixing outright.
+  "https://github.com/apps/ethos-manual-editor/installations/new";

@@ -49,6 +49,9 @@ import path from "path";
 import fs from "fs";
 import http from "http";
 
+// TEMPORARY DEBUG — remove before committing.
+app.commandLine.appendSwitch("remote-debugging-port", "9333");
+
 const PORT = process.env.PORT || "4100";
 
 // Not the same NODE_ENV check as startBackend()'s own — this reads it
@@ -193,7 +196,7 @@ async function createWindow(targetUrl: string): Promise<void> {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
-    title: "Ethos Manual Translator",
+    title: "Ethos Manual Editor",
     icon: ICON_PATH,
     webPreferences: {
       nodeIntegration: false,
@@ -254,7 +257,7 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.error("Startup failed:", err);
     dialog.showErrorBox(
-      "Ethos Manual Translator failed to start",
+      "Ethos Manual Editor failed to start",
       String(err),
     );
     app.quit();
