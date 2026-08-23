@@ -35,11 +35,13 @@ import { GitHubToken } from "../githubClient";
 
 const router = express.Router();
 
-function tokenForRequest(req: express.Request): GitHubToken | null {
+// async — getTokenForUser() may need to make a real refresh-token network
+// call before it can answer (see authRoutes.ts:getUsableToken()).
+async function tokenForRequest(req: express.Request): Promise<GitHubToken | null> {
   const login = req.session?.login;
   if (!login) return null;
   try {
-    return getTokenForUser(login);
+    return await getTokenForUser(login);
   } catch {
     return null; // session says signed in but the stored token's gone — fall back to anonymous
   }
@@ -55,7 +57,7 @@ function handleRepoError(res: express.Response, err: unknown) {
 
 router.get("/branches", async (req, res) => {
   try {
-    const branches = await listBranches(tokenForRequest(req));
+    const branches = await listBranches(await tokenForRequest(req));
     res.json({ branches });
   } catch (err) {
     handleRepoError(res, err);
@@ -89,7 +91,7 @@ router.get("/toc", async (req, res) => {
   const locale = (req.query.locale as string) || "en";
 
   try {
-    const token = tokenForRequest(req);
+    const token = await tokenForRequest(req);
     const config = await fetchMkdocsConfig(token, branch);
     const locales = localeNames(config);
 
@@ -125,7 +127,7 @@ router.get("/toc", async (req, res) => {
 router.get("/tree", async (req, res) => {
   const branch = (req.query.branch as string) || "main";
   try {
-    const token = tokenForRequest(req);
+    const token = await tokenForRequest(req);
     const paths = await fetchRepoTree(token, branch);
     res.json({ paths: Array.from(paths) });
   } catch (err) {
@@ -143,7 +145,7 @@ router.get("/page", async (req, res) => {
   }
 
   try {
-    const token = tokenForRequest(req);
+    const token = await tokenForRequest(req);
 
     const englishSource = await fetchPageSource(token, branch, "en", mdPath);
 

@@ -17,6 +17,25 @@ repo:**
   on disk when no session exists — right for a single-user desktop
   install (see that file's own comment), so a restart never actually
   forces a fresh device-flow login.
+- **Access-token refresh** (`authRoutes.ts:getUsableToken()`/
+  `refreshStoredToken()`): this GitHub App expires user access tokens
+  after ~8h (the default for new Apps). Caught live — the topbar
+  correctly showed "Sign in with GitHub" hours after a real login, which
+  turned out to be genuinely-expired-with-no-recovery-path, not a display
+  bug (verified the display logic itself is correct via a live DOM check
+  over the Chrome DevTools Protocol — screenshotting the Electron window
+  via `PrintWindow` intermittently blanks GPU-composited regions and sent
+  an earlier pass down the wrong path; CDP's `Runtime.evaluate` is the
+  reliable way to inspect this app's actual rendered state). Every stored
+  token now also keeps the `refresh_token` GitHub issues alongside it;
+  when an access token has expired, `getUsableToken()` silently exchanges
+  it for a new one (GitHub rotates the refresh_token on every use, so the
+  stored record is always overwritten as a pair) before any route acts as
+  though the user is signed out. Only a genuinely dead refresh_token (past
+  its own ~6-month expiry, or rejected by GitHub) actually forces a fresh
+  device-flow login. `getTokenForUser()` (and both routes'
+  `tokenForRequest()` wrappers) became async as part of this, since a
+  refresh is a real network call.
 - Anonymous-capable nav browsing: branches, locales, the nav tree annotated
   with translated/missing status, per-page English + translation +
   staleness (`translated_from:` vs. the English page's current commit SHA).

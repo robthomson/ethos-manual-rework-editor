@@ -42,11 +42,13 @@ import type { GitHubToken } from "../githubClient";
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
-function tokenForRequest(req: express.Request): GitHubToken | null {
+// async — getTokenForUser() may need to make a real refresh-token network
+// call before it can answer (see authRoutes.ts:getUsableToken()).
+async function tokenForRequest(req: express.Request): Promise<GitHubToken | null> {
   const login = req.session?.login;
   if (!login) return null;
   try {
-    return getTokenForUser(login);
+    return await getTokenForUser(login);
   } catch {
     return null;
   }
@@ -79,7 +81,7 @@ router.post("/", async (req, res) => {
     // Validate the locale actually exists on this branch before creating
     // anything — a typo'd locale code would otherwise silently create a
     // workspace that can never successfully materialize any page.
-    const token = tokenForRequest(req);
+    const token = await tokenForRequest(req);
     const config = await fetchMkdocsConfig(token, branch);
     const locales = localeNames(config);
     if (!(locale in locales)) {
@@ -107,7 +109,7 @@ router.get("/:name/page", async (req, res) => {
   if (!mdPath) return res.status(400).json({ error: "Missing path" });
 
   try {
-    const token = tokenForRequest(req);
+    const token = await tokenForRequest(req);
     const page = await ensurePageMaterialized(token, req.params.name, mdPath);
     res.json(page);
   } catch (err) {
@@ -139,7 +141,7 @@ router.post("/:name/new-page", async (req, res) => {
   }
 
   try {
-    const token = tokenForRequest(req);
+    const token = await tokenForRequest(req);
     const result = await createNewPage(token, req.params.name, title, slug, sectionTitle);
     res.json(result);
   } catch (err) {
@@ -158,7 +160,7 @@ router.post("/:name/new-section", async (req, res) => {
   }
 
   try {
-    const token = tokenForRequest(req);
+    const token = await tokenForRequest(req);
     const result = await createNewSection(token, req.params.name, title, slug);
     res.json(result);
   } catch (err) {

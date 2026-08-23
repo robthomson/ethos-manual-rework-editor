@@ -74,6 +74,14 @@ interface StoredToken {
   expires_at: number;
   login: string;
   id: number;
+  // Only present for a GitHub App with "expire user authorization tokens"
+  // enabled (the default for new Apps) — access_token above then expires
+  // in ~8h, and this is what lets getUsableToken() below silently mint a
+  // new one instead of forcing a full device-flow re-login every time.
+  // GitHub rotates the refresh_token on every use, so refreshStoredToken()
+  // always overwrites both together, never just the access_token.
+  refresh_token?: string;
+  refresh_token_expires_at?: number;
 }
 
 function tokenPath(id: number) {
@@ -94,17 +102,112 @@ function readTokenFile(file: string): StoredToken | null {
       return null;
     }
 
-    if (Date.now() > data.expires_at) {
-      console.log(`⏳ Token for ${data.login} expired, deleting`);
-      fs.unlinkSync(file);
-      return null;
-    }
-
+    // Deliberately does NOT delete an expired access_token here anymore —
+    // that used to also throw away a still-live refresh_token sitting in
+    // the same record, forcing a full device-flow re-login even when a
+    // silent refresh (getUsableToken() below) could have recovered it.
+    // Expiry is judged there, where a refresh can actually be attempted.
     return data;
   } catch (err) {
     console.error("Failed to load token file:", file, err);
     return null;
   }
+}
+
+function isRefreshable(token: StoredToken): boolean {
+  return (
+    !!token.refresh_token &&
+    typeof token.refresh_token_expires_at === "number" &&
+    Date.now() < token.refresh_token_expires_at
+  );
+}
+
+// GitHub rotates the refresh_token on every use — the response's own
+// refresh_token (if present) is what gets stored, never the one just
+// spent. No client_secret needed, same reasoning as the initial device-
+// flow exchange in /device/poll below: this app is a public client.
+async function refreshStoredToken(token: StoredToken): Promise<StoredToken | null> {
+  if (!token.refresh_token) return null;
+
+  try {
+    const params = new URLSearchParams();
+    params.append("client_id", GITHUB_CLIENT_ID);
+    params.append("grant_type", "refresh_token");
+    params.append("refresh_token", token.refresh_token);
+
+    const resp = await fetch("https://github.com/login/oauth/access_token", {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: params.toString(),
+    });
+
+    const data = (await resp.json()) as AccessTokenResponse;
+
+    if (data.error || !data.access_token) {
+      // The refresh_token itself was rejected (revoked, already used,
+      // past its own ~6-month expiry) — no path forward but a real
+      // re-login, so there's nothing left worth keeping on disk.
+      console.log(
+        `🔁 Refresh failed for ${token.login} (${data.error || "no access_token"}) — dropping stored token.`,
+      );
+      fs.unlinkSync(tokenPath(token.id));
+      return null;
+    }
+
+    const expires_at =
+      typeof data.expires_in === "number" ? Date.now() + data.expires_in * 1000 : Date.now() + 8 * 60 * 60 * 1000;
+
+    const updated: StoredToken = {
+      access_token: data.access_token,
+      expires_at,
+      login: token.login,
+      id: token.id,
+      refresh_token: data.refresh_token,
+      refresh_token_expires_at:
+        data.refresh_token && typeof data.refresh_token_expires_in === "number"
+          ? Date.now() + data.refresh_token_expires_in * 1000
+          : undefined,
+    };
+
+    saveToken(updated);
+    console.log(`🔁 Refreshed access token for ${token.login}`);
+    return updated;
+  } catch (err) {
+    // A transient network hiccup, not a rejection — leave the stored
+    // record (and its still-possibly-good refresh_token) alone so the
+    // next request can just try again, rather than punishing a blip with
+    // a forced re-login.
+    console.error(`Refresh request failed for ${token.login}:`, err);
+    return null;
+  }
+}
+
+// The one function every route below should call instead of loadToken()
+// directly when it actually needs to *use* the token (call the GitHub
+// API with it) — loadToken()'s raw record may hold an access_token
+// that's already expired. This is what makes "sign in once" actually
+// stick past the ~8h access-token lifetime instead of silently reverting
+// to logged-out.
+async function getUsableToken(login: string): Promise<StoredToken | null> {
+  const token = loadToken(login);
+  if (!token) return null;
+
+  if (Date.now() < token.expires_at) return token;
+
+  if (isRefreshable(token)) {
+    return refreshStoredToken(token);
+  }
+
+  // Genuinely dead: access_token expired, no live refresh_token to
+  // recover with (or none was ever issued — e.g. a token saved before
+  // this app stored refresh_token at all). A real re-login is the only
+  // way forward.
+  console.log(`⏳ Token for ${login} expired with no usable refresh_token, deleting`);
+  fs.unlinkSync(tokenPath(token.id));
+  return null;
 }
 
 function loadToken(login: string): StoredToken | null {
@@ -157,6 +260,10 @@ interface DeviceCodeResponse {
 interface AccessTokenResponse {
   access_token?: string;
   expires_in?: number;
+  // Only present when the GitHub App has "expire user authorization
+  // tokens" enabled — see StoredToken's own comment.
+  refresh_token?: string;
+  refresh_token_expires_in?: number;
   scope?: string;
   token_type?: string;
   error?: string;
@@ -244,6 +351,11 @@ router.post("/device/poll", async (req, res) => {
       expires_at,
       login: user.login,
       id: user.id,
+      refresh_token: data.refresh_token,
+      refresh_token_expires_at:
+        data.refresh_token && typeof data.refresh_token_expires_in === "number"
+          ? Date.now() + data.refresh_token_expires_in * 1000
+          : undefined,
     };
 
     saveToken(token);
@@ -283,7 +395,7 @@ router.post("/device/poll", async (req, res) => {
 // authenticated?" anymore (that let anyone probe/impersonate any GitHub
 // username); it can only ask "who does my own session cookie belong to?".
 // ---------------------------------------------
-router.get("/session", (req, res) => {
+router.get("/session", async (req, res) => {
   let login = req.session.login;
 
   // No session yet for this cookie (fresh browser session, or the
@@ -299,21 +411,27 @@ router.get("/session", (req, res) => {
     }
   }
 
-  const authenticated = !!login && !!loadToken(login);
+  // getUsableToken() (not loadToken()) — silently refreshes an expired
+  // access_token via its refresh_token if one's still good, rather than
+  // reporting "not authenticated" just because the ~8h access-token
+  // lifetime passed since this cookie was issued.
+  const token = login ? await getUsableToken(login) : null;
 
-  if (!authenticated) {
-    // Token expired/was revoked since the cookie was issued — don't keep
-    // asserting a session that no longer has a usable token behind it.
+  if (!token) {
+    // Truly expired/revoked, no refresh path left — don't keep asserting
+    // a session that no longer has a usable token behind it.
     req.session.login = undefined;
   }
 
-  res.json({ authenticated, login: authenticated ? login : null });
+  res.json({ authenticated: !!token, login: token ? login : null });
 });
 
 // ---------------------------------------------
 // Auth Status (legacy, param'd form) — only ever confirms the caller's OWN
 // session, not an arbitrary username, so this can't be used to check
-// whether someone else has authenticated with this app.
+// whether someone else has authenticated with this app. Not called by the
+// frontend (which uses /session) — kept as a presence-only check (doesn't
+// attempt a refresh, since it doesn't hand back or use the token itself).
 // ---------------------------------------------
 router.get("/status/:login", (req, res) => {
   const authenticated =
@@ -330,7 +448,7 @@ router.get("/me/:login", async (req, res) => {
     return res.status(403).json({ error: "Forbidden" });
   }
 
-  const token = loadToken(req.params.login);
+  const token = await getUsableToken(req.params.login);
 
   if (!token) {
     return res.status(401).json({ error: "Not authenticated" });
@@ -360,7 +478,7 @@ router.get("/me/:login", async (req, res) => {
 // ---------------------------------------------
 router.get("/installation-status", async (req, res) => {
   const login = req.session.login;
-  const token = login ? loadToken(login) : null;
+  const token = login ? await getUsableToken(login) : null;
 
   if (!login || !token) {
     return res.status(401).json({ error: "Not authenticated" });
@@ -400,10 +518,13 @@ router.post("/logout", (req, res) => {
 });
 
 // ---------------------------------------------
-// Export helper for docsRoutes/gitRoutes
+// Export helper for navRoutes/workspaceRoutes/gitRoutes — async now
+// (getUsableToken() may need to make a real refresh-token network call
+// before it can answer), so every caller's own tokenForRequest() needs an
+// await too (see navRoutes.ts/workspaceRoutes.ts).
 // ---------------------------------------------
-export function getTokenForUser(login: string): string {
-  const token = loadToken(login);
+export async function getTokenForUser(login: string): Promise<string> {
+  const token = await getUsableToken(login);
   if (!token) throw new Error("User not authenticated");
   return token.access_token;
 }
