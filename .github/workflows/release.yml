@@ -12,6 +12,13 @@ jobs:
   build-app:
     name: Build app (${{ matrix.os_name }}-${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
+    # Caught live: a Windows leg once sat on the electron-builder step for
+    # 1h24m (all 4 other platforms finished in minutes) with no error —
+    # a stuck/wedged hosted-runner VM or a hung binary download, not a
+    # bug in this config (the identical command succeeded locally in
+    # ~8 minutes). No single step has its own timeout, so a repeat
+    # would otherwise silently burn hours instead of failing fast.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:

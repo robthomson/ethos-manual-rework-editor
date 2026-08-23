@@ -8,6 +8,11 @@ jobs:
   build-app:
     name: Build PR (${{ matrix.os_name }}-${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
+    # See release.yml's own comment — a Windows leg once hung on the
+    # electron-builder step for 1h24m (a stuck runner/download, not this
+    # config; the same command succeeded locally in ~8 minutes) with no
+    # per-step timeout to catch it.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
