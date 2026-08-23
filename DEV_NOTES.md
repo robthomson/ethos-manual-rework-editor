@@ -90,6 +90,26 @@ repo:**
   this isn't just a missing feature but an active data-loss risk if
   skipped. Each editing pane is now a three-way Rich/Source/Preview
   toggle, defaulting to Rich when it's safe to.
+- **Formatting toolbar in Rich mode** (Bold/Italic/Link/Image): each
+  button calls the relevant `@milkdown/preset-commonmark` command from
+  outside the ProseMirror view via `editor.action(callCommand(command.key,
+  payload))` — the documented pattern for driving Milkdown from ordinary
+  React UI rather than a keymap. Every button `preventDefault()`s on
+  mousedown (not click), or the browser would shift focus to the button
+  before the click handler runs and collapse whatever selection the
+  command needs to act on. Link opens a small inline URL field in the
+  toolbar itself rather than a floating popover — simpler, no selection-
+  relative positioning to get right. Image reuses `AddImageModal.tsx`
+  (the same upload/list-existing flow Source mode's own "Insert image"
+  button already uses) but inserts via `insertImageCommand` at the live
+  ProseMirror selection instead of splicing the plain-text textarea
+  value. No "justify"/text-align button — CommonMark (and this repo's
+  own pymdownx extension list) has no text-alignment concept at all, so
+  there'd be nothing meaningful for it to write into the saved markdown.
+  Verified end-to-end against a real running instance (Chrome DevTools
+  Protocol driving real selections + clicks, not just a type-check):
+  Bold/Italic/Link all round-tripped to exactly correct markdown
+  (`**Emergency**`, `*watchdog*`, `[SD card failure](https://…)`).
 - **Hard-wrapped paragraphs rendered with huge gaps in Rich mode**
   (fixed): this repo's markdown source hard-wraps prose at ~80 columns
   (real physical line breaks *within* a paragraph, not blank-line
@@ -151,10 +171,10 @@ repo:**
   written up, not yet implemented.
 - Spellcheck-in-editor.
 - Structural insert helpers as UI (a toolbar to insert an admonition/
-  table/tab without hand-typing syntax) — Rich mode's own native
-  formatting controls (once a toolbar/slash-menu is added — Milkdown
-  supports both, neither wired up yet) may end up subsuming most of the
-  original need for this in the Source-mode workflow.
+  table/tab without hand-typing syntax) — Rich mode now has a basic
+  formatting toolbar (Bold/Italic/Link/Image), but nothing yet for
+  admonitions/tables/tabs specifically (those need the custom-node work
+  below first, since Rich mode can't represent them at all yet).
 - The diff-vs-English view.
 - **Not machine-verified**: the actual browse/drag/paste interaction in
   the image-upload modal (upload/list/serve endpoints themselves were
@@ -369,10 +389,10 @@ sign-in doesn't buy you.
   approach is fully researched (see the dedicated section above); this
   is the natural next step to make Rich mode available on the
   (admonition-heavy) pages currently gated to Source.
-- Structural insert helpers / a Rich-mode toolbar or slash-menu — neither
-  built yet; worth deciding whether Milkdown's own native ones (once
-  wired up) cover what was originally wanted here, or whether the
-  Source-mode pymdownx-specific insert helpers from the original plan
-  are still separately wanted.
+- A basic Rich-mode toolbar (Bold/Italic/Link/Image) is now built; still
+  worth deciding whether the Source-mode pymdownx-specific insert
+  helpers (admonition/table/tab) from the original plan are still wanted
+  as their own UI, or should wait for/fold into Rich mode's custom-node
+  support above once that exists.
 - The diff-vs-English view, spellcheck, and the actual commit/PR flow
   remain unbuilt — see "Not built yet" above.
