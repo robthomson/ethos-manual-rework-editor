@@ -13,13 +13,14 @@
  *   the toc fetch's own locale list comes back — the locale dropdown
  *   only really becomes meaningful once that list exists.
  *
- *   addLocalPage() is the one thing here that doesn't come from a
- *   fetch: a brand-new page created via createNewPage() (English-only,
+ *   addLocalPage()/addLocalSection() are the one thing here that doesn't
+ *   come from a fetch: a brand-new page or section created via
+ *   createNewPage()/createNewSection() (English-only,
  *   backend/workspaceStore.ts) only exists in that workspace's local
  *   mkdocs.yml, not upstream — the live /api/nav/toc this hook otherwise
  *   relies on has no way to know about it until a PR actually merges.
  *   Splicing it into the in-memory tree client-side is what makes a
- *   just-created page immediately reachable again (e.g. after
+ *   just-created page or section immediately reachable again (e.g. after
  *   navigating away and back) within the same session, without
  *   pretending the backend's own view of the nav has changed.
  */
@@ -100,5 +101,24 @@ export function useNav() {
     );
   }
 
-  return { branches, branch, setBranch, locales, locale, setLocale, toc, loading, error, addLocalPage };
+  // Appends a brand-new top-level section (its own landing page, no
+  // children yet) — matches backend/workspaceStore.ts:createNewSection()'s
+  // own "push a new top-level nav entry" placement.
+  function addLocalSection(title: string, mdPath: string) {
+    setToc((prev) => [...prev, { title, mdPath, status: "source", children: [] }]);
+  }
+
+  return {
+    branches,
+    branch,
+    setBranch,
+    locales,
+    locale,
+    setLocale,
+    toc,
+    loading,
+    error,
+    addLocalPage,
+    addLocalSection,
+  };
 }

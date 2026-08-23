@@ -338,16 +338,54 @@ export interface NewPageResult {
   mdPath: string;
 }
 
+// Shared by createNewPage() and createNewSection() below — both need to
+// read mkdocs.yml's current *working* state (a prior new-page/new-section
+// call this session, if any) or else fetch+baseline it fresh from GitHub
+// exactly once, then hand back the parsed config ready to mutate.
+async function loadWorkingMkdocsConfig(
+  token: GitHubToken | null,
+  root: string,
+  branch: string,
+): Promise<{ config: Record<string, any>; nav: any[] }> {
+  const mkdocsWorking = mkdocsWorkingPath(root);
+  const mkdocsBaseline = mkdocsBaselinePath(root);
+
+  let rawYaml: string;
+  if (await fs.pathExists(mkdocsWorking)) {
+    rawYaml = await fs.readFile(mkdocsWorking, "utf8");
+  } else {
+    try {
+      rawYaml = await fetchRawMkdocsYaml(token, branch);
+    } catch (err) {
+      if (err instanceof RepoError) throw new WorkspaceError(err.message);
+      throw err;
+    }
+    await fs.ensureDir(path.dirname(mkdocsBaseline));
+    await fs.writeFile(mkdocsBaseline, rawYaml, "utf8");
+  }
+
+  const config = (yaml.load(rawYaml) as Record<string, any>) || {};
+  const nav: any[] = Array.isArray(config.nav) ? config.nav : [];
+  return { config, nav };
+}
+
+// Re-dumping the whole parsed YAML config (rather than a targeted text
+// insertion) means the committed mkdocs.yml will come out fully
+// reformatted — correct content, but a much noisier diff than "one line
+// added". A known, deliberate scope cut for now; revisit with a
+// line-based insertion if that turns out to matter in practice.
+async function saveWorkingMkdocsConfig(root: string, config: Record<string, any>): Promise<void> {
+  const mkdocsWorking = mkdocsWorkingPath(root);
+  const newYaml = yaml.dump(config, { flowLevel: -1, sortKeys: false, lineWidth: -1 });
+  await fs.ensureDir(path.dirname(mkdocsWorking));
+  await fs.writeFile(mkdocsWorking, newYaml, "utf8");
+}
+
 // English-only (enforced here, not just at the route layer, so this
 // can never be reached any other way even if a future caller forgets
 // the check) — writes the new page's own file AND inserts its nav
 // entry into a local working copy of mkdocs.yml, both tracked by
-// scanChanges() below ready for a future commit/PR. Re-dumping the
-// whole parsed YAML config (rather than a targeted text insertion)
-// means the committed mkdocs.yml will come out fully reformatted —
-// correct content, but a much noisier diff than "one line added". A
-// known, deliberate scope cut for now; revisit with a line-based
-// insertion if that turns out to matter in practice.
+// scanChanges() below ready for a future commit/PR.
 export async function createNewPage(
   token: GitHubToken | null,
   name: string,
@@ -369,25 +407,7 @@ export async function createNewPage(
   }
 
   const root = workspaceRoot(name);
-  const mkdocsWorking = mkdocsWorkingPath(root);
-  const mkdocsBaseline = mkdocsBaselinePath(root);
-
-  let rawYaml: string;
-  if (await fs.pathExists(mkdocsWorking)) {
-    rawYaml = await fs.readFile(mkdocsWorking, "utf8");
-  } else {
-    try {
-      rawYaml = await fetchRawMkdocsYaml(token, meta.branch);
-    } catch (err) {
-      if (err instanceof RepoError) throw new WorkspaceError(err.message);
-      throw err;
-    }
-    await fs.ensureDir(path.dirname(mkdocsBaseline));
-    await fs.writeFile(mkdocsBaseline, rawYaml, "utf8");
-  }
-
-  const config = (yaml.load(rawYaml) as Record<string, any>) || {};
-  const nav: any[] = Array.isArray(config.nav) ? config.nav : [];
+  const { config, nav } = await loadWorkingMkdocsConfig(token, root, meta.branch);
 
   const landingPath = findSectionLandingPath(nav, sectionTitle);
   if (landingPath === null) {
@@ -413,10 +433,7 @@ export async function createNewPage(
 
   children.push({ [title]: mdPath });
   config.nav = nav;
-
-  const newYaml = yaml.dump(config, { flowLevel: -1, sortKeys: false, lineWidth: -1 });
-  await fs.ensureDir(path.dirname(mkdocsWorking));
-  await fs.writeFile(mkdocsWorking, newYaml, "utf8");
+  await saveWorkingMkdocsConfig(root, config);
 
   const workingPagePath = workingCopyPath(root, "en", mdPath);
   await fs.ensureDir(path.dirname(workingPagePath));
@@ -425,6 +442,74 @@ export async function createNewPage(
   // new page itself — scanChanges()'s existing "no baseline at all"
   // branch already reports that as "added", which is exactly right: this
   // page never existed upstream at all, unlike an edited translation.
+
+  return { mdPath };
+}
+
+export interface NewSectionResult {
+  mdPath: string; // the new section's own landing page, e.g. "wiring/index.md"
+}
+
+// A "section" here means a new top-level nav category with its own
+// landing page — confirmed against the real mkdocs.yml (every existing
+// top-level entry is exactly this shape: a label, an index.md landing
+// page, then child pages; there's no deeper nesting in practice). Same
+// English-only restriction and working-copy-of-mkdocs.yml mechanics as
+// createNewPage() above (see that function's own comments) — a section
+// is just a page-less nav entry until its own landing page is written.
+export async function createNewSection(
+  token: GitHubToken | null,
+  name: string,
+  title: string,
+  slug: string,
+): Promise<NewSectionResult> {
+  const meta = await readMeta(name);
+  if (meta.locale !== "en") {
+    throw new WorkspaceError(
+      "New sections can only be authored in English — every other locale only ever translates pages that already exist in English.",
+    );
+  }
+  if (!title.trim()) {
+    throw new WorkspaceError("Enter a title for the new section.");
+  }
+  if (!slug || !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug)) {
+    throw new WorkspaceError("Slug must be lowercase letters, numbers, and hyphens only.");
+  }
+
+  const root = workspaceRoot(name);
+  const { config, nav } = await loadWorkingMkdocsConfig(token, root, meta.branch);
+
+  const titleCollision = nav.some(
+    (entry) => entry && typeof entry === "object" && !Array.isArray(entry) && title in entry,
+  );
+  if (titleCollision) {
+    throw new WorkspaceError(`A section named "${title}" already exists.`);
+  }
+  // The folder is what actually has to be unique on disk — two
+  // differently-titled sections both slugified to "wiring" would
+  // otherwise silently collide and overwrite each other's landing page.
+  const folderCollision = nav.some((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+    return Object.values(entry).some((value) => {
+      const rest = Array.isArray(value) ? value : [];
+      return typeof rest[0] === "string" && (rest[0] === `${slug}/index.md` || rest[0].startsWith(`${slug}/`));
+    });
+  });
+  if (folderCollision) {
+    throw new WorkspaceError(`A section already uses the "${slug}/" folder — pick a different slug.`);
+  }
+
+  const mdPath = `${slug}/index.md`;
+  nav.push({ [title]: [mdPath] });
+  config.nav = nav;
+  await saveWorkingMkdocsConfig(root, config);
+
+  const workingPagePath = workingCopyPath(root, "en", mdPath);
+  await fs.ensureDir(path.dirname(workingPagePath));
+  await fs.writeFile(workingPagePath, `# ${title}\n\n`, "utf8");
+  // Same reasoning as createNewPage(): no .baseline/ or frontmatter
+  // sidecar for a page that never existed upstream — scanChanges()
+  // already reports that correctly as "added".
 
   return { mdPath };
 }

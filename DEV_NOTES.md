@@ -38,6 +38,22 @@ repo:**
 - **New page creation** (English-only): writes the page file under
   `docs/en/` and inserts the nav entry into a local working copy of
   `mkdocs.yml`. Both tracked in the workspace's change list.
+- **New section creation** (English-only, `createNewSection()` in
+  `workspaceStore.ts`): adds a brand-new top-level nav category — its
+  own landing page at `docs/en/<slug>/index.md`, no children yet.
+  Confirmed against the real `mkdocs.yml` that every existing top-level
+  entry is exactly this shape (label → landing `index.md` → child
+  pages), so a section is scoped to that same pattern rather than
+  inventing a new nav shape. Shares the working-copy-of-`mkdocs.yml`
+  load/save helpers with `createNewPage()` (`loadWorkingMkdocsConfig()`/
+  `saveWorkingMkdocsConfig()`, factored out of what was previously
+  `createNewPage()`-only code) rather than duplicating that read/dump
+  logic a second time. Guards against both a duplicate section title and
+  a duplicate folder slug (two different titles slugifying to the same
+  folder would otherwise silently collide). `NewSectionModal.tsx`
+  (sibling to `NewPageModal.tsx`, no section-picker needed since a new
+  section has nowhere existing to be placed under) + a "+ New Section"
+  button next to "+ New Page" in the sidebar.
 - **Live rendered preview** (`frontend/src/preview/`): a real remark/
   rehype pipeline for `ethos-manual-rework`'s actual pymdownx syntax
   (`!!!`/`???`/`???+` admonitions & details, `=== "Tab"` tabbed content),

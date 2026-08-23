@@ -30,6 +30,7 @@ import {
   savePage,
   scanChanges,
   createNewPage,
+  createNewSection,
   listWorkspaceImages,
   uploadImage,
   workspaceImageFilePath,
@@ -140,6 +141,25 @@ router.post("/:name/new-page", async (req, res) => {
   try {
     const token = tokenForRequest(req);
     const result = await createNewPage(token, req.params.name, title, slug, sectionTitle);
+    res.json(result);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// English-only — createNewSection() enforces this itself too, same
+// reasoning as new-page above. A "section" is a brand-new top-level nav
+// category (its own landing page, no children yet) — see that
+// function's own comment for why a section is scoped to that shape.
+router.post("/:name/new-section", async (req, res) => {
+  const { title, slug } = req.body || {};
+  if (!title || !slug) {
+    return res.status(400).json({ error: "Missing title or slug." });
+  }
+
+  try {
+    const token = tokenForRequest(req);
+    const result = await createNewSection(token, req.params.name, title, slug);
     res.json(result);
   } catch (err) {
     handleError(res, err);

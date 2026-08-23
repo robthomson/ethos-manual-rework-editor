@@ -36,6 +36,7 @@ import { PageView } from "./components/PageView";
 import { EditablePageView } from "./components/EditablePageView";
 import { WorkspaceBar } from "./components/WorkspaceBar";
 import { NewPageModal } from "./components/NewPageModal";
+import { NewSectionModal } from "./components/NewSectionModal";
 
 export default function App() {
   const {
@@ -52,8 +53,19 @@ export default function App() {
     logout,
   } = useAuth();
 
-  const { branches, branch, setBranch, locales, locale, setLocale, toc, loading, error, addLocalPage } =
-    useNav();
+  const {
+    branches,
+    branch,
+    setBranch,
+    locales,
+    locale,
+    setLocale,
+    toc,
+    loading,
+    error,
+    addLocalPage,
+    addLocalSection,
+  } = useNav();
 
   const {
     workspaces,
@@ -70,6 +82,7 @@ export default function App() {
 
   const [selectedPage, setSelectedPage] = useState<{ mdPath: string; title: string } | null>(null);
   const [showNewPageModal, setShowNewPageModal] = useState(false);
+  const [showNewSectionModal, setShowNewSectionModal] = useState(false);
 
   // Editing just works as soon as a locale's picked — see this file's
   // header comment for why this replaced requiring an explicit "create a
@@ -147,6 +160,23 @@ export default function App() {
     if (!res.ok) return { ok: false, error: data.error || "Failed to create the page." };
 
     addLocalPage(sectionTitle, title, data.mdPath);
+    await refreshChanges();
+    setSelectedPage({ mdPath: data.mdPath, title });
+    return { ok: true };
+  }
+
+  async function handleCreateNewSection(title: string, slug: string) {
+    if (!activeWorkspace) return { ok: false, error: "No active workspace." };
+
+    const res = await fetch(`/api/workspace/${encodeURIComponent(activeWorkspace.name)}/new-section`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, slug }),
+    });
+    const data = await res.json();
+    if (!res.ok) return { ok: false, error: data.error || "Failed to create the section." };
+
+    addLocalSection(title, data.mdPath);
     await refreshChanges();
     setSelectedPage({ mdPath: data.mdPath, title });
     return { ok: true };
@@ -241,6 +271,9 @@ export default function App() {
               <button className="link-button" onClick={() => setShowNewPageModal(true)}>
                 + New Page (English)
               </button>
+              <button className="link-button" onClick={() => setShowNewSectionModal(true)}>
+                + New Section (English)
+              </button>
             </div>
           )}
 
@@ -261,6 +294,10 @@ export default function App() {
             onCreate={handleCreateNewPage}
             onClose={() => setShowNewPageModal(false)}
           />
+        )}
+
+        {showNewSectionModal && (
+          <NewSectionModal onCreate={handleCreateNewSection} onClose={() => setShowNewSectionModal(false)} />
         )}
 
         <main className="app-main">
