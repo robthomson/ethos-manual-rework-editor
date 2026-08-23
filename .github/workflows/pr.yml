@@ -64,14 +64,20 @@ jobs:
         shell: bash
         run: npm pkg set version="0.0.0-${{ env.GIT_VER }}"
 
-      # See release.yml's own comment: the Windows hang's signature (dead
-      # stop right after a signtool pass on a fresh unsigned exe) points
-      # to Windows Defender's real-time scanner, not this config. Safe to
-      # disable on this ephemeral, single-use VM.
-      - name: Disable Windows Defender real-time scanning
+      # See release.yml's own comment: `Set-MpPreference
+      # -DisableRealtimeMonitoring` looked like a fix but is silently
+      # no-op'd by Tamper Protection on hosted Windows runners. Exclusion
+      # paths/processes ARE honored — use those instead.
+      - name: Exclude build paths from Windows Defender scanning
         if: runner.os == 'Windows'
         shell: powershell
-        run: Set-MpPreference -DisableRealtimeMonitoring $true
+        run: |
+          Add-MpPreference -ExclusionPath "${{ github.workspace }}"
+          Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\electron-builder\Cache"
+          Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\Temp"
+          Add-MpPreference -ExclusionProcess "electron-builder.exe"
+          Add-MpPreference -ExclusionProcess "makensis.exe"
+          Add-MpPreference -ExclusionProcess "signtool.exe"
 
       # Builds natively for whatever OS/arch this runner already is — see
       # release.yml's own comment for why no --win/--mac/--linux or

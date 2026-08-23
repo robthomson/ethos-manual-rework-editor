@@ -304,13 +304,25 @@ repo:**
   unsigned exe — is the known pattern for Windows Defender's real-time
   scanner grabbing or quarantining the file, not a bug in this project's
   config (a documented issue for Electron+NSIS builds on Windows CI
-  runners generally). Fixed by disabling real-time scanning for the
-  Windows leg specifically (`Set-MpPreference -DisableRealtimeMonitoring
-  $true`, Windows-only step, right before the build step, in all three
-  workflows) — safe on an ephemeral, single-use CI VM. Kept
-  `signAndEditExecutable: false` too (still a real, if partial,
-  reduction in signtool calls). **Not yet re-verified in CI** — needs a
-  fresh tagged run to confirm the Windows leg actually completes now.
+  runners generally). First attempt: `Set-MpPreference
+  -DisableRealtimeMonitoring $true` as a Windows-only step before the
+  build step. **Re-verified in CI (retagged `release/0.2.0`) — still
+  hung**, cancelled again at the 25-minute wall, but at a *different*
+  point this time (right after downloading the NSIS packaging tool
+  itself, before signtool ever ran) — same class of AV interference,
+  just unlucky timing. The step itself ran with no error, which was the
+  giveaway: GitHub's hosted Windows runners have Defender **Tamper
+  Protection** on, which silently no-ops `-DisableRealtimeMonitoring`
+  entirely (their own runner-images docs say Defender can't be disabled
+  on hosted runners, only excluded from). Switched to
+  `Add-MpPreference -ExclusionPath`/`-ExclusionProcess` instead —
+  exclusions *are* honored under Tamper Protection — covering the repo
+  workspace, electron-builder's cache dir, and the temp dir, plus
+  process exclusions for `electron-builder.exe`/`makensis.exe`/
+  `signtool.exe`. Kept `signAndEditExecutable: false` too (still a real,
+  if partial, reduction in signtool calls). **Not yet re-verified in
+  CI** — needs another retagged run to confirm the Windows leg actually
+  completes now.
 - **Image handling**: relative image `src`s resolve to real
   raw.githubusercontent.com URLs, replicating `mkdocs.yml`'s actual
   `i18n: fallback_to_default: true` config — a locale-specific screenshot
