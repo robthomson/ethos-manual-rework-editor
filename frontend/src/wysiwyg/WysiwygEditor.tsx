@@ -24,6 +24,26 @@
  *   mdast-util-to-markdown extension, mirroring how Milkdown's own
  *   built-in blockquote node round-trips).
  *
+ *   Image display resolution: caught live (Rich mode showed every image
+ *   broken, while Preview mode worked) — Milkdown's built-in image node
+ *   just uses the literal relative `src` from the markdown source
+ *   (`../assets/foo.png`), which resolves to nothing against this app's
+ *   own URL. Fixed via `imageSchema.extendSchema()` (the documented
+ *   Milkdown pattern for overriding one property of a preset's built-in
+ *   node — confirmed by reading @milkdown/preset-commonmark's own
+ *   blockquote/image source) to override *only* `toDOM` — the node's
+ *   real `attrs.src` (what parseMarkdown/toMarkdown read and write) stays
+ *   the original relative reference, so saving is unaffected; only the
+ *   DOM's own `src` attribute (what the browser actually fetches) is
+ *   swapped for a resolved one, via the same resolveImageSrc() the
+ *   rendered preview uses (see imageResolver.ts). Resolution needs the
+ *   repo-tree/workspace-image-list fetch (fetchImageResolutionContext())
+ *   to have *already completed* before the editor (and its image nodes)
+ *   are created at all — toDOM must return synchronously, unlike the
+ *   preview's own async-then-render flow — so this component renders a
+ *   brief loading state until that fetch resolves, then mounts the real
+ *   editor once, with the resolution context already in hand.
+ *
  *   Verified end-to-end (headings, bold/italic, links, lists, a GFM
  *   table, a real blockquote, a fenced code block) against a real
  *   running instance: renders as genuine rich text, and round-trips
@@ -45,23 +65,42 @@
  *   EditablePageView.tsx already remounts this component fresh (via a
  *   `key` prop) on every page switch, so defaultValueCtx alone covers
  *   the common case; the replaceAll path exists for full correctness
- *   regardless.
+ *   regardless. The same reasoning applies to imageCtx below: this
+ *   component only ever mounts the real editor once it's already
+ *   resolved, so it's safe to close over without needing a
+ *   replaceAll-style update path.
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { Editor, rootCtx, defaultValueCtx } from "@milkdown/kit/core";
 import { commonmark } from "@milkdown/kit/preset/commonmark";
+import { imageSchema } from "@milkdown/preset-commonmark";
 import { gfm } from "@milkdown/kit/preset/gfm";
 import { history } from "@milkdown/kit/plugin/history";
 import { listener, listenerCtx } from "@milkdown/kit/plugin/listener";
 import { replaceAll } from "@milkdown/kit/utils";
+import {
+  fetchImageResolutionContext,
+  resolveImageSrc,
+  type ImageResolutionContext,
+} from "../preview/imageResolver";
 
 interface WysiwygEditorProps {
   content: string;
   onChange: (markdown: string) => void;
+  branch: string;
+  locale: string;
+  mdPath: string;
+  workspace?: string;
 }
 
-function EditorInner({ content, onChange }: WysiwygEditorProps) {
+interface EditorInnerProps {
+  content: string;
+  onChange: (markdown: string) => void;
+  imageCtx: ImageResolutionContext;
+}
+
+function EditorInner({ content, onChange, imageCtx }: EditorInnerProps) {
   // Refs, not state — markdownUpdated's callback closure is captured
   // once at editor-creation time (deps: []), so it needs a stable way to
   // reach the *current* onChange/content without stale-closure issues.
@@ -70,6 +109,26 @@ function EditorInner({ content, onChange }: WysiwygEditorProps) {
   const lastContentRef = useRef(content);
 
   const { get } = useEditor((root) => {
+    // Overrides only toDOM (see this file's header comment) — attrs.src
+    // stays the original relative reference, so parseMarkdown/toMarkdown
+    // (which read/write attrs.src directly, unchanged from the preset's
+    // own definition) are completely unaffected; only what the browser
+    // actually renders changes.
+    const resolvedImageSchema = imageSchema.extendSchema((prev) => (ctx) => {
+      const schema = prev(ctx);
+      return {
+        ...schema,
+        toDOM: (node) => {
+          // Non-null assertion: confirmed by reading @milkdown/preset-
+          // commonmark's own image.ts source directly — its toDOM is
+          // always defined, this isn't guessing past a real gap.
+          const [tag, attrs] = schema.toDOM!(node) as [string, Record<string, unknown>];
+          const resolved = resolveImageSrc(String(attrs.src ?? ""), imageCtx);
+          return [tag, resolved ? { ...attrs, src: resolved } : attrs];
+        },
+      };
+    });
+
     return Editor.make()
       .config((ctx) => {
         ctx.set(rootCtx, root);
@@ -82,6 +141,7 @@ function EditorInner({ content, onChange }: WysiwygEditorProps) {
       })
       .use(commonmark)
       .use(gfm)
+      .use(resolvedImageSchema) // after commonmark, so it overrides that preset's own image node
       .use(history)
       .use(listener);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -98,10 +158,26 @@ function EditorInner({ content, onChange }: WysiwygEditorProps) {
   return <Milkdown />;
 }
 
-export function WysiwygEditor(props: WysiwygEditorProps) {
+export function WysiwygEditor({ content, onChange, branch, locale, mdPath, workspace }: WysiwygEditorProps) {
+  const [imageCtx, setImageCtx] = useState<ImageResolutionContext | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchImageResolutionContext(branch, locale, mdPath, workspace ?? null).then((ctx) => {
+      if (!cancelled) setImageCtx(ctx);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [branch, locale, mdPath, workspace]);
+
+  if (!imageCtx) {
+    return <div className="page-view-loading">Loading editor…</div>;
+  }
+
   return (
     <MilkdownProvider>
-      <EditorInner {...props} />
+      <EditorInner content={content} onChange={onChange} imageCtx={imageCtx} />
     </MilkdownProvider>
   );
 }

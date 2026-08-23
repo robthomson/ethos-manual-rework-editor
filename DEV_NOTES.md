@@ -66,7 +66,19 @@ repo:**
   folder (confirmed real convention — NOT a per-page `img/` folder the
   way docEditor assumes) and inserts a reference at the textarea cursor;
   a freshly-uploaded image (nothing committed upstream yet) resolves to
-  a local serving route instead of a GitHub URL.
+  a local serving route instead of a GitHub URL. This resolution logic
+  (`frontend/src/preview/imageResolver.ts`) is shared between Preview and
+  Rich mode — Rich mode originally had no equivalent of it at all (caught
+  live: every image showed broken in Rich mode while Preview worked fine,
+  since Milkdown's default image node just uses the literal relative
+  `src` from the markdown source). Fixed via `imageSchema.extendSchema()`
+  (the documented Milkdown pattern for overriding one property of a
+  preset's built-in node) to override *only* the node's `toDOM` — the
+  real `attrs.src` that `parseMarkdown`/`toMarkdown` read and write stays
+  the original relative reference, so saving is unaffected; only what the
+  browser actually renders is swapped for a resolved URL. Verified: image
+  displays correctly in Rich mode, and the round-tripped markdown still
+  contains the original relative path.
 - `make dev` boots backend + Vite + a real Electron window together
   (originally didn't — docEditor's own `dev` script doesn't either; you're
   expected to open a plain browser tab. Fixed here since a desktop app

@@ -279,7 +279,14 @@ export function EditablePageView({
           )}
           {effectiveMode === "rich" ? (
             <div className="wysiwyg-scroll">
-              <WysiwygEditor content={content} onChange={handleChange} />
+              <WysiwygEditor
+                content={content}
+                onChange={handleChange}
+                branch={branch}
+                locale={locale}
+                mdPath={mdPath}
+                workspace={workspace}
+              />
             </div>
           ) : effectiveMode === "source" ? (
             <textarea

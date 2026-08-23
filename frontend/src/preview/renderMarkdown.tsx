@@ -50,6 +50,13 @@
  *   filename is one this workspace uploaded itself, it's served locally
  *   via backend/routes/workspaceRoutes.ts's own image-serving route
  *   instead of a raw.githubusercontent.com URL.
+ *
+ *   The actual resolution logic lives in imageResolver.ts now, shared
+ *   with wysiwyg/WysiwygEditor.tsx's own image node override — Rich
+ *   mode originally had no equivalent of this at all (caught live: it
+ *   showed every image broken, while Preview mode worked correctly),
+ *   and duplicating this fallback/local-upload logic a second time
+ *   instead of sharing it would have meant two copies drifting apart.
  */
 import { useEffect, useState } from "react";
 import * as React from "react";
@@ -63,87 +70,21 @@ import * as jsxRuntime from "react/jsx-runtime";
 import { visit } from "unist-util-visit";
 import { preprocessPymdownxBlocks, remarkPymdownxBlocks } from "./pymdownxBlocks";
 import { remarkStripAttrList } from "./attrList";
-import { fetchRepoTree } from "./repoTree";
+import { fetchImageResolutionContext, resolveImageSrc, type ImageResolutionContext } from "./imageResolver";
 
-// Matches backend/config/github.ts's own defaults — not currently
-// shared between front/backend (this app has no shared-types package
-// yet), so this needs to stay in sync by hand if that ever changes.
-const GITHUB_OWNER = "robthomson";
-const GITHUB_REPO = "ethos-manual-rework";
-
-// Resolves a relative reference (e.g. "../assets/foo.png") against a
-// repo-relative directory (e.g. "docs/nl/model-setup") to a repo-relative
-// path — pure path algebra (no network), via the URL constructor against
-// a throwaway origin so "./", "../", and bare-relative forms are all
-// handled the same uniform way a browser resolves them.
-function resolveRepoRelativePath(baseDir: string, ref: string): string {
-  const resolved = new URL(ref, `https://x/${baseDir}/`);
-  return resolved.pathname.replace(/^\//, "");
-}
-
-function rehypeRewriteImages(
-  branch: string,
-  locale: string,
-  mdPath: string,
-  existingPaths: Set<string>,
-  workspace: string | null,
-  workspaceImages: Set<string>,
-) {
-  const mdDir = mdPath.includes("/") ? mdPath.slice(0, mdPath.lastIndexOf("/")) : "";
-  const localeBaseDir = `docs/${locale}/${mdDir}`;
-
+function rehypeRewriteImages(ctx: ImageResolutionContext) {
   return () => (tree: any) => {
     visit(tree, "element", (node: any) => {
       if (node.tagName !== "img" || !node.properties?.src) return;
-      const src = String(node.properties.src);
-      if (/^(https?:)?\/\//.test(src) || src.startsWith("data:")) return;
-
-      try {
-        const localePath = resolveRepoRelativePath(localeBaseDir, src);
-        const filename = localePath.split("/").pop() ?? "";
-
-        // Uploaded this session, not committed upstream anywhere yet —
-        // check before the upstream-tree logic below, which would never
-        // find it either way.
-        if (workspace && workspaceImages.has(filename)) {
-          node.properties.src = `/api/workspace/${encodeURIComponent(workspace)}/images/${encodeURIComponent(filename)}`;
-          return;
-        }
-
-        // existingPaths is only ever empty for locale === "en" itself
-        // (see MarkdownPreview below — no fallback needed, or possible,
-        // for English) or when the tree fetch failed; either way,
-        // "assume it exists" is the safer default — a real 404 still
-        // just shows as a broken image, whereas wrongly falling back
-        // would point English's screenshot at a translated page that
-        // actually has its own.
-        const finalPath =
-          existingPaths.size === 0 || existingPaths.has(localePath)
-            ? localePath
-            : localePath.replace(`docs/${locale}/`, "docs/en/");
-
-        node.properties.src = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${branch}/${finalPath}`;
-      } catch {
-        // Malformed relative path — leave it as-is rather than throwing
-        // and blanking the whole preview over one bad image reference.
-      }
+      const resolved = resolveImageSrc(String(node.properties.src), ctx);
+      if (resolved) node.properties.src = resolved;
     });
   };
 }
 
-export interface RenderMarkdownOptions {
-  branch: string;
-  locale: string;
-  mdPath: string; // used only to resolve this page's own image references
-  existingPaths: Set<string>; // see rehypeRewriteImages above
-  workspace?: string | null;
-  workspaceImages?: Set<string>;
-}
+export interface RenderMarkdownOptions extends ImageResolutionContext {}
 
-export function renderMarkdown(
-  content: string,
-  { branch, locale, mdPath, existingPaths, workspace = null, workspaceImages = new Set() }: RenderMarkdownOptions,
-): React.ReactNode {
+export function renderMarkdown(content: string, ctx: RenderMarkdownOptions): React.ReactNode {
   const { text, markers } = preprocessPymdownxBlocks(content);
 
   const file = unified()
@@ -153,7 +94,7 @@ export function renderMarkdown(
     .use(remarkPymdownxBlocks, markers)
     .use(remarkRehype)
     .use(rehypeSlug)
-    .use(rehypeRewriteImages(branch, locale, mdPath, existingPaths, workspace, workspaceImages))
+    .use(rehypeRewriteImages(ctx))
     .use(rehypeReact, {
       Fragment: jsxRuntime.Fragment,
       jsx: jsxRuntime.jsx,
@@ -192,20 +133,9 @@ export function MarkdownPreview({ content, branch, locale, mdPath, workspace }: 
 
     const timer = setTimeout(async () => {
       try {
-        // English has nothing to fall back to (it IS the default), so
-        // skip the tree fetch entirely — matches navRoutes.ts's own
-        // "toc" endpoint doing the same for the identical reason.
-        const [existingPaths, workspaceImages] = await Promise.all([
-          locale === "en" ? new Set<string>() : fetchRepoTree(branch),
-          workspace
-            ? fetch(`/api/workspace/${encodeURIComponent(workspace)}/images`)
-                .then((res) => res.json())
-                .then((data: { images?: string[] }) => new Set(data.images || []))
-                .catch(() => new Set<string>())
-            : Promise.resolve(new Set<string>()),
-        ]);
+        const ctx = await fetchImageResolutionContext(branch, locale, mdPath, workspace ?? null);
         if (cancelled) return;
-        setNode(renderMarkdown(content, { branch, locale, mdPath, existingPaths, workspace, workspaceImages }));
+        setNode(renderMarkdown(content, ctx));
         setError(null);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
