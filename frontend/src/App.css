@@ -677,7 +677,18 @@
 
 /* WysiwygEditor.tsx (Milkdown) — element selectors rather than
    Milkdown's own wrapper class names, so this doesn't silently stop
-   applying if those change across versions. */
+   applying if those change across versions. Specifically
+   [contenteditable="true"], not bare [contenteditable] — caught live:
+   a hard-wrapped source paragraph (physical line breaks mid-paragraph,
+   a real convention in this docs repo) showed an oversized gap at every
+   wrap point in Rich mode but not Preview. Milkdown represents each of
+   those soft line breaks as its own inline "hardbreak" node — ProseMirror's
+   document model has no way to put a literal newline inside a text
+   node — which renders as `<span data-type="hardbreak"
+   contenteditable="false"> </span>`. The bare attribute selector matches
+   contenteditable's mere *presence*, true or false, so this rule's own
+   padding was landing on that inner false-marker span too, turning an
+   otherwise perfectly ordinary single space into a visibly padded gap. */
 .wysiwyg-scroll {
   flex: 1;
   min-height: 0;
@@ -687,7 +698,7 @@
   background: white;
 }
 
-.wysiwyg-scroll [contenteditable] {
+.wysiwyg-scroll [contenteditable="true"] {
   padding: 0.75rem 1rem;
   outline: none;
   font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -697,41 +708,41 @@
   min-height: 100%;
 }
 
-.wysiwyg-scroll [contenteditable] img {
+.wysiwyg-scroll [contenteditable="true"] img {
   max-width: 100%;
 }
 
-.wysiwyg-scroll [contenteditable] pre {
+.wysiwyg-scroll [contenteditable="true"] pre {
   background: #f4f4f4;
   padding: 0.75rem 1rem;
   border-radius: 4px;
   overflow-x: auto;
 }
 
-.wysiwyg-scroll [contenteditable] code {
+.wysiwyg-scroll [contenteditable="true"] code {
   font-family: "SF Mono", Consolas, monospace;
   background: #f4f4f4;
   padding: 0.1rem 0.3rem;
   border-radius: 3px;
 }
 
-.wysiwyg-scroll [contenteditable] pre code {
+.wysiwyg-scroll [contenteditable="true"] pre code {
   background: none;
   padding: 0;
 }
 
-.wysiwyg-scroll [contenteditable] table {
+.wysiwyg-scroll [contenteditable="true"] table {
   border-collapse: collapse;
   margin: 0.75rem 0;
 }
 
-.wysiwyg-scroll [contenteditable] th,
-.wysiwyg-scroll [contenteditable] td {
+.wysiwyg-scroll [contenteditable="true"] th,
+.wysiwyg-scroll [contenteditable="true"] td {
   border: 1px solid #ddd;
   padding: 0.35rem 0.6rem;
 }
 
-.wysiwyg-scroll [contenteditable] blockquote {
+.wysiwyg-scroll [contenteditable="true"] blockquote {
   border-left: 3px solid #ccc;
   margin: 0.5rem 0;
   padding: 0.1rem 0 0.1rem 1rem;

@@ -90,6 +90,27 @@ repo:**
   this isn't just a missing feature but an active data-loss risk if
   skipped. Each editing pane is now a three-way Rich/Source/Preview
   toggle, defaulting to Rich when it's safe to.
+- **Hard-wrapped paragraphs rendered with huge gaps in Rich mode**
+  (fixed): this repo's markdown source hard-wraps prose at ~80 columns
+  (real physical line breaks *within* a paragraph, not blank-line
+  separated) — a CommonMark "soft break", supposed to render as an
+  ordinary single space. Preview mode already did that correctly; Rich
+  mode showed a visibly padded gap at every wrap point instead. Root
+  cause, confirmed live via Chrome DevTools Protocol (`Runtime.evaluate`
+  on the actual running app — far more reliable here than a screenshot;
+  `PrintWindow` intermittently blanks GPU-composited regions of an
+  Electron window, which cost some time on an unrelated investigation
+  earlier): ProseMirror's document model can't put a literal newline
+  inside a text node, so Milkdown represents each of these soft breaks as
+  its own inline node, rendered as `<span data-type="hardbreak"
+  contenteditable="false"> </span>`. `App.css`'s own
+  `.wysiwyg-scroll [contenteditable] { padding: 0.75rem 1rem; ... }` used
+  a *bare* attribute selector, which matches `contenteditable`'s mere
+  presence — true **or** false — so that padding was landing on every
+  one of these inner false-marker spans too, turning an ordinary single
+  space into a visibly padded 32px gap. Fixed by scoping every such
+  selector to `[contenteditable="true"]`, which only ever matches the
+  one real editable root.
 - **Image handling**: relative image `src`s resolve to real
   raw.githubusercontent.com URLs, replicating `mkdocs.yml`'s actual
   `i18n: fallback_to_default: true` config — a locale-specific screenshot
