@@ -29,7 +29,7 @@
 import "./App.css";
 import { useEffect, useState } from "react";
 import { useAuth } from "./hooks/useAuth";
-import { useNav } from "./hooks/useNav";
+import { useNav, type NavPage } from "./hooks/useNav";
 import { useWorkspace } from "./hooks/useWorkspace";
 import { NavTree } from "./components/NavTree";
 import { PageView } from "./components/PageView";
@@ -37,6 +37,19 @@ import { EditablePageView } from "./components/EditablePageView";
 import { WorkspaceBar } from "./components/WorkspaceBar";
 import { NewPageModal } from "./components/NewPageModal";
 import { NewSectionModal } from "./components/NewSectionModal";
+
+// The Changes list (WorkspaceBar.tsx) only ever gets a bare mdPath back
+// from scanChanges() — this resolves it to the same friendly title
+// NavTree already shows for that page, so clicking a change opens the
+// page under its real name rather than its raw file path.
+function findTitleByPath(nodes: NavPage[], mdPath: string): string | null {
+  for (const node of nodes) {
+    if (node.mdPath === mdPath) return node.title;
+    const found = findTitleByPath(node.children, mdPath);
+    if (found) return found;
+  }
+  return null;
+}
 
 export default function App() {
   const {
@@ -131,6 +144,14 @@ export default function App() {
       setSelectedPage(null);
     }
     return ok;
+  }
+
+  // A change entry only ever knows its own bare mdPath (see
+  // findTitleByPath's own comment) — falls back to that path itself if
+  // the page genuinely isn't in the currently-loaded toc for some reason
+  // (e.g. a stale/renamed entry), rather than showing nothing at all.
+  function selectChangedPage(mdPath: string) {
+    setSelectedPage({ mdPath, title: findTitleByPath(toc, mdPath) ?? mdPath });
   }
 
   const isEditing =
@@ -260,6 +281,8 @@ export default function App() {
             onCreate={handleCreateWorkspace}
             onDelete={deleteWorkspace}
             changes={changes}
+            onSelectChange={selectChangedPage}
+            selectedPath={selectedPage?.mdPath ?? null}
             createError={workspaceError}
             branch={branch}
             defaultLocale={locale === "en" ? Object.keys(locales).find((l) => l !== "en") || "en" : locale}

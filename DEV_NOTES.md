@@ -53,7 +53,12 @@ repo:**
   GitHub once, then pure local disk I/O), autosave, and a real
   added/modified change list (diffed against a per-page `.baseline/`
   snapshot, not mere file existence, so opening a page you never edit is
-  never itself a "change").
+  never itself a "change"). Each entry in that list is clickable
+  (`WorkspaceBar.tsx`), same as a nav-tree row — resolves the change's
+  bare mdPath back to its real nav title in `App.tsx`
+  (`findTitleByPath()`) rather than showing/opening it by raw file path,
+  and cross-highlights with the nav tree so a change opened from here
+  reads as selected in both places.
 - **New page creation** (English-only): writes the page file under
   `docs/en/` and inserts the nav entry into a local working copy of
   `mkdocs.yml`. Both tracked in the workspace's change list.

@@ -519,8 +519,22 @@
 }
 
 .workspace-changes li {
-  padding: 0.15rem 0;
+  padding: 0.15rem 0.3rem;
+  border-radius: 4px;
   word-break: break-all;
+}
+
+.workspace-changes li.clickable {
+  cursor: pointer;
+}
+
+.workspace-changes li.clickable:hover {
+  background: #eef1f4;
+}
+
+.workspace-changes li.active {
+  background: #dbeafe;
+  font-weight: 600;
 }
 
 .change-badge {

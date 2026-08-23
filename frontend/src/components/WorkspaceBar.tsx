@@ -14,6 +14,14 @@
  *   you're not actually looking at. Locale is still a real choice (the
  *   whole reason to have more than one workspace), pre-selected to the
  *   currently browsed locale as a starting point.
+ *
+ *   Each entry in the Changes list is clickable (onSelectChange), same
+ *   as a NavTree row — App.tsx resolves the entry's bare mdPath back to
+ *   its nav title (falling back to the path itself if the page isn't in
+ *   the currently-loaded toc for some reason) rather than this component
+ *   knowing anything about nav structure itself. `selectedPath` mirrors
+ *   NavTree's own "active" highlighting, so a change opened from here
+ *   reads as selected here too, not just in the nav tree above it.
  */
 import { useEffect, useState } from "react";
 import type { ChangeEntry, WorkspaceMeta } from "../hooks/useWorkspace";
@@ -25,6 +33,8 @@ interface WorkspaceBarProps {
   onCreate: (name: string, locale: string) => Promise<boolean>;
   onDelete: (name: string) => void;
   changes: ChangeEntry[];
+  onSelectChange: (mdPath: string) => void;
+  selectedPath: string | null;
   createError: string | null;
   branch: string;
   defaultLocale: string;
@@ -38,6 +48,8 @@ export function WorkspaceBar({
   onCreate,
   onDelete,
   changes,
+  onSelectChange,
+  selectedPath,
   createError,
   branch,
   defaultLocale,
@@ -127,7 +139,11 @@ export function WorkspaceBar({
           {changes.length === 0 && <p className="workspace-changes-empty">Nothing edited yet.</p>}
           <ul>
             {changes.map((c) => (
-              <li key={c.path}>
+              <li
+                key={c.path}
+                className={"clickable" + (c.path === selectedPath ? " active" : "")}
+                onClick={() => onSelectChange(c.path)}
+              >
                 <span className={`change-badge change-${c.type}`}>{c.type === "added" ? "+" : "~"}</span>
                 {c.path}
               </li>
