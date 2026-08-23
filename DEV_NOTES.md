@@ -254,6 +254,20 @@ repo:**
   so this is a real, not just a paper, confirmation the pipeline works.
   `src/` itself (and `README.md`/`Releases.md`, which still describe the
   old app) are untouched for now — ask if those should also go.
+  **Follow-up, caught in the first real tag-triggered run**: every
+  platform failed at the very last step with `GitHub Personal Access
+  Token is not set, neither programmatically, nor using env "GH_TOKEN"`.
+  electron-builder auto-detects a `release/*`-shaped tag in CI and
+  defaults to trying to *publish the release itself* via its own
+  built-in GitHub-publish feature — never configured (no `publish` field
+  in `package.json`'s `build` block) and never intended; the actual
+  GitHub Release is `release.yml`'s own separate `create-release` job,
+  using `gh release create` after downloading every platform's uploaded
+  artifact. Local `npm run dist` never hit this because electron-builder
+  only auto-publishes when it detects a real CI+tag environment, not a
+  plain local run. Fixed by making `dist` always pass
+  `--publish never` explicitly, so this can't happen regardless of what
+  environment it runs in.
 - **Image handling**: relative image `src`s resolve to real
   raw.githubusercontent.com URLs, replicating `mkdocs.yml`'s actual
   `i18n: fallback_to_default: true` config — a locale-specific screenshot
