@@ -1,3 +1,11 @@
+## 0.2.3
+
+- Windows builds are now produced automatically by the same release
+  pipeline as macOS and Linux, instead of being built by hand and
+  attached separately -- no functional change for end users, but the
+  Windows download is now guaranteed to be built from the exact same
+  commit as every other platform's, every release.
+
 ## 0.2.2
 
 - Rich mode (the WYSIWYG editor) can now edit pages with admonitions
