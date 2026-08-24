@@ -44,18 +44,25 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+            frontend/package-lock.json
 
+      # npm ci (not npm install) — faster (no dependency resolution,
+      # just installs exactly what's locked) and never rewrites the
+      # lockfile, which matters for the npm pkg set step right below.
       - name: Install dependencies
         shell: bash
         run: |
-          npm install
-          npm --prefix backend install
-          npm --prefix frontend install
+          npm ci
+          npm --prefix backend ci
+          npm --prefix frontend ci
 
       # npm pkg set (not `npm version`, which refuses to run unless the
-      # git working directory is clean — something `npm install` above
-      # could easily violate via lockfile drift) just edits the field
-      # directly, which is all this needs.
+      # git working directory is clean) just edits the field directly,
+      # which is all this needs.
       - name: Set package version (PR-based)
         shell: bash
         run: npm pkg set version="0.0.0-${{ env.GIT_VER }}"
