@@ -86,6 +86,25 @@ jobs:
         shell: bash
         run: npm pkg set version="${{ env.GIT_VER }}"
 
+      # Without this, the packaged app has no GITHUB_CLIENT_ID and every
+      # end user hits "Couldn't start GitHub sign-in" on first launch —
+      # see electron/main.ts's own comment for how this file gets loaded
+      # at runtime (before the userData cwd redirect) and package.json's
+      # extraResources for how it gets bundled. The repo secret is named
+      # GH_APP_CLIENT_ID rather than GITHUB_APP_CLIENT_ID/GITHUB_CLIENT_ID
+      # because GitHub Actions rejects any secret name starting with the
+      # GITHUB_ prefix (reserved for its own auto-provided values) — add
+      # it at Settings → Secrets and variables → Actions → New repository
+      # secret, value = the ethos-manual-editor GitHub App's client id
+      # (https://github.com/settings/apps/ethos-manual-editor). Not a
+      # true secret (it's a public device-flow client id, safe to embed
+      # in a downloadable executable — see config/github.ts's own
+      # comment), so nothing here needs the extra care a real credential
+      # would.
+      - name: Write backend/.env
+        shell: bash
+        run: echo "GITHUB_CLIENT_ID=${{ secrets.GH_APP_CLIENT_ID }}" > backend/.env
+
       # Builds natively for whatever OS/arch this runner already is — no
       # explicit --win/--mac/--linux or --x64/--arm64 flags needed, since
       # each matrix entry's host already matches the target (matching how

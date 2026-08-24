@@ -83,6 +83,27 @@ const RESOURCES_ROOT = app.isPackaged
 function startBackend(): void {
   console.log("RESOURCES_ROOT:", RESOURCES_ROOT, "| packaged:", app.isPackaged);
 
+  // Load backend/.env (GITHUB_CLIENT_ID etc.) from RESOURCES_ROOT
+  // *before* the cwd redirect below. backend/server.ts / config/github.ts
+  // also call dotenv.config() themselves, but with no path argument that
+  // resolves relative to process.cwd() — which by the time they run has
+  // already been chdir'd to the per-user userData dir, so it would never
+  // find a .env sitting next to the packaged backend anyway. dotenv
+  // doesn't override already-set process.env values by default, so
+  // pre-loading here is safe even though server.ts calls it again.
+  //
+  // Required from backend/node_modules rather than added as a root
+  // dependency of this project — that directory is already bundled
+  // alongside backend/dist (see package.json's extraResources) and
+  // exists in dev too (`make init`), so this works unpackaged and
+  // packaged without adding anything new to install.
+  try {
+    const dotenv = require(path.join(RESOURCES_ROOT, "backend", "node_modules", "dotenv"));
+    dotenv.config({ path: path.join(RESOURCES_ROOT, "backend", ".env") });
+  } catch (err) {
+    console.error("Failed to load backend/.env:", err);
+  }
+
   const userDataDir = app.getPath("userData");
   fs.mkdirSync(userDataDir, { recursive: true });
 
@@ -108,17 +129,26 @@ function startBackend(): void {
   require(path.join(RESOURCES_ROOT, "backend", "dist", "server.js"));
 }
 
+// Shape of backend/server.ts's /api/health response — see that file's own
+// comment on githubClientIdConfigured for why it's there.
+interface HealthResponse {
+  status: string;
+  mode: string;
+  githubClientIdConfigured?: boolean;
+}
+
 // Confirms /api/health answers AND that whatever answered is actually the
 // instance we expect on this port — not just anything. A leftover dev-mode
 // instance and a real packaged/production instance answer this exact same
 // route identically except for `mode`, so a bare "did something respond"
 // check can't tell them apart; expectedMode says which one we're actually
-// waiting for.
+// waiting for. Resolves with the parsed body (not just void) so callers can
+// also inspect fields like githubClientIdConfigured.
 function waitForServer(
   url: string,
   timeoutMs: number,
   expectedMode: "production" | "development",
-): Promise<void> {
+): Promise<HealthResponse> {
   const start = Date.now();
 
   return new Promise((resolve, reject) => {
@@ -131,7 +161,7 @@ function waitForServer(
             try {
               const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
               if (body.mode === expectedMode) {
-                resolve();
+                resolve(body);
                 return;
               }
               reject(
@@ -192,7 +222,7 @@ const ICON_PATH = path.join(RESOURCES_ROOT, "electron", "icon.ico");
 
 const PRELOAD_PATH = path.join(__dirname, "preload.js");
 
-async function createWindow(targetUrl: string): Promise<void> {
+async function createWindow(targetUrl: string): Promise<BrowserWindow> {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -236,6 +266,36 @@ async function createWindow(targetUrl: string): Promise<void> {
   }
 
   await win.loadURL(targetUrl);
+  return win;
+}
+
+// End users aren't expected to know what "GITHUB_CLIENT_ID" means or to
+// go digging through logs for it — this is the one place that translates
+// "the packaged build is missing a config value" into something a
+// non-technical person can actually act on (or at least report). Shown
+// once at startup rather than only surfacing later as the frontend's own
+// cryptic "Couldn't start GitHub sign-in" the first time someone tries to
+// use the Sign in button — see backend/server.ts's /api/health comment
+// for how this got detected. Deliberately non-fatal: browsing the manual
+// works fine without sign-in (see DEV_NOTES.md), so this warns rather
+// than blocking startup.
+function warnIfGitHubSignInUnavailable(win: BrowserWindow, health: HealthResponse): void {
+  if (health.githubClientIdConfigured) return;
+
+  console.error(
+    "⚠️  GITHUB_CLIENT_ID is not configured in this build — GitHub sign-in will not work.",
+  );
+
+  dialog.showMessageBox(win, {
+    type: "warning",
+    title: "GitHub sign-in unavailable",
+    message: "GitHub sign-in isn't set up in this copy of Ethos Manual Editor.",
+    detail:
+      "You can still browse the manual, but signing in and submitting changes " +
+      "won't work. This is a packaging problem, not something wrong on your " +
+      "end — please let the developer know.",
+    buttons: ["OK"],
+  });
 }
 
 app.whenReady().then(async () => {
@@ -246,13 +306,15 @@ app.whenReady().then(async () => {
       // start here, just wait for both before opening a window pointed
       // at the Vite dev server itself (not this app's own PORT, which
       // dev mode never listens on).
-      await waitForServer(DEV_BACKEND_HEALTH_URL, 15000, "development");
+      const health = await waitForServer(DEV_BACKEND_HEALTH_URL, 15000, "development");
       await waitForHttp(DEV_FRONTEND_URL, 15000);
-      await createWindow(DEV_FRONTEND_URL);
+      const win = await createWindow(DEV_FRONTEND_URL);
+      warnIfGitHubSignInUnavailable(win, health);
     } else {
       startBackend();
-      await waitForServer(`http://localhost:${PORT}/api/health`, 15000, "production");
-      await createWindow(`http://localhost:${PORT}/`);
+      const health = await waitForServer(`http://localhost:${PORT}/api/health`, 15000, "production");
+      const win = await createWindow(`http://localhost:${PORT}/`);
+      warnIfGitHubSignInUnavailable(win, health);
     }
   } catch (err) {
     console.error("Startup failed:", err);

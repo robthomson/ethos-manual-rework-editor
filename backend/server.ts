@@ -47,6 +47,7 @@ import authRoutes from "./routes/authRoutes";
 import navRoutes from "./routes/navRoutes";
 import workspaceRoutes from "./routes/workspaceRoutes";
 import gitRoutes from "./routes/gitRoutes";
+import { GITHUB_CLIENT_ID } from "./config/github";
 
 const app = express();
 const PORT = process.env.PORT || 4100;
@@ -129,9 +130,20 @@ app.use("/api/workspace", gitRoutes);
 
 // Health check — includes mode so electron/main.ts's startup health-check
 // can tell "our own production instance answered" apart from "something
-// else entirely answered on this port".
+// else entirely answered on this port". Also reports whether a GitHub
+// Client ID actually made it into this process — electron/main.ts checks
+// this once at startup and warns the (non-technical) end user with a
+// plain dialog if it's missing, rather than letting them discover it only
+// after clicking "Sign in with GitHub" and getting a cryptic error deep
+// in the UI. See config/github.ts's own comment for what an empty
+// GITHUB_CLIENT_ID means and electron/main.ts's startBackend() for how a
+// packaged build is supposed to get one.
 app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", mode: process.env.NODE_ENV || "development" });
+  res.json({
+    status: "ok",
+    mode: process.env.NODE_ENV || "development",
+    githubClientIdConfigured: !!GITHUB_CLIENT_ID,
+  });
 });
 
 // Serve the built frontend in production — dev mode keeps using Vite's own

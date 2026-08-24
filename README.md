@@ -95,6 +95,17 @@ workflow runs; there's no separate manual packaging step to keep in sync.
 
 ## Releasing
 
+- Requires a `GH_APP_CLIENT_ID` repository secret (Settings → Secrets and
+  variables → Actions), set to the `ethos-manual-editor` GitHub App's
+  client id (https://github.com/settings/apps/ethos-manual-editor) — every
+  CI-built binary writes it into `backend/.env` before packaging (see
+  `.github/workflows/release.yml`), otherwise the shipped app has no
+  `GITHUB_CLIENT_ID` and every end user hits "Couldn't start GitHub
+  sign-in" on first launch. Named `GH_APP_CLIENT_ID` rather than
+  `GITHUB_CLIENT_ID` because Actions rejects any secret name starting with
+  the `GITHUB_` prefix. Not a real secret (a public device-flow client id,
+  safe inside a downloadable executable — see `config/github.ts`'s own
+  comment) — this is just where it needs to live for CI to reach it.
 - Add a matching `## <version>` section to `Releases.md` before tagging —
   `.github/scripts/extract-release-notes.py` pulls that section verbatim
   into the release notes.
