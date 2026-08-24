@@ -7,11 +7,16 @@ name: Debug Windows CI Hang (timed full dist)
 # the ~2000-file win-unpacked directory (95% of which was backend/
 # node_modules, much of it devDependency-only tooling never needed at
 # runtime) at maximum LZMA compression, single-threaded, on a shared
-# runner core. This workflow validates the fix (a genuinely separate
-# production-only backend/node_modules.prod/, via scripts/
-# prepare-backend-prod-modules.js) by just running the real, full
-# `npm run dist` unattended and timing it -- no interactive tmate
-# needed this time, since the point is to measure, not explore. Delete
+# runner core. scripts/prepare-backend-prod-modules.js cut that to
+# ~930/932 files (54%) -- but a first unattended full-`npm run dist`
+# timing run still took 40+ minutes without finishing, so this version
+# times each phase (npm ci, build, predist, electron-builder) SEPARATELY
+# instead of one opaque `time npm run dist` -- need to know whether the
+# remaining time is really electron-builder/7za still, or something else
+# entirely, before drawing more conclusions. Also switched install steps
+# to `npm ci` (faster/more reproducible than `npm install`, though not
+# expected to be the actual bottleneck here -- install already completed
+# quickly in the prior run, before the step that stayed stuck). Delete
 # once the fix is confirmed/merged.
 on:
   workflow_dispatch:
@@ -28,24 +33,45 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+            frontend/package-lock.json
 
-      - name: Install dependencies
+      - name: Timed install (npm ci x3)
         shell: bash
         run: |
-          npm install
-          npm --prefix backend install
-          npm --prefix frontend install
+          echo "Starting installs at $(date -u +%H:%M:%S)"
+          time npm ci
+          time npm --prefix backend ci
+          time npm --prefix frontend ci
+          echo "Finished installs at $(date -u +%H:%M:%S)"
 
       - name: Write backend/.env
         shell: bash
         run: echo "GITHUB_CLIENT_ID=${{ secrets.GH_APP_CLIENT_ID }}" > backend/.env
 
-      - name: Timed full dist (build + package)
+      - name: Timed build (frontend + backend + electron main -- no packaging yet)
         shell: bash
         run: |
-          echo "Starting npm run dist at $(date -u +%H:%M:%S)"
-          time npm run dist
-          echo "Finished npm run dist at $(date -u +%H:%M:%S)"
+          echo "Starting build at $(date -u +%H:%M:%S)"
+          time npm run build
+          echo "Finished build at $(date -u +%H:%M:%S)"
+
+      - name: Timed predist (prepare-backend-prod-modules.js)
+        shell: bash
+        run: |
+          echo "Starting predist at $(date -u +%H:%M:%S)"
+          time npm run predist
+          echo "Finished predist at $(date -u +%H:%M:%S)"
+
+      - name: Timed electron-builder (the actual packaging/compression step)
+        shell: bash
+        run: |
+          echo "Starting electron-builder at $(date -u +%H:%M:%S)"
+          time npx electron-builder --publish never
+          echo "Finished electron-builder at $(date -u +%H:%M:%S)"
 
       - name: List build output
         shell: bash
