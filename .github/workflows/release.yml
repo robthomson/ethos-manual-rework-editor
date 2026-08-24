@@ -12,18 +12,26 @@ jobs:
   build-app:
     name: Build app (${{ matrix.os_name }}-${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
-    # Caught live: a Windows leg once sat on the electron-builder step for
-    # 1h24m (all 4 other platforms finished in minutes) with no error —
-    # a stuck/wedged hosted-runner VM or a hung binary download, not a
-    # bug in this config (the identical command succeeded locally in
-    # ~8 minutes). No single step has its own timeout, so a repeat
-    # would otherwise silently burn hours instead of failing fast.
+    # Caught live: `windows-latest` (which had just moved to a brand-new
+    # Windows Server 2025 image, `win25/...`) reproducibly hung the
+    # electron-builder step every single time, always stopping at the
+    # exact same point — right after downloading electron-builder's
+    # bundled `nsis-3.0.4.1.7z` packaging tool, before any extraction
+    # output. Two rounds of Windows-Defender mitigations (disabling
+    # real-time scanning, then path/process exclusions) made zero
+    # difference and it hung at that identical byte-for-byte spot both
+    # times — ruling out AV interference and pointing at the runner
+    # image itself being incompatible with that bundled tool. Pinned to
+    # `windows-2022` (a known-stable prior image) instead of chasing the
+    # new image further. Kept the timeout as a safety net regardless —
+    # if a hang like this ever recurs, this fails fast instead of
+    # silently burning hours.
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: windows-latest
+          - runner: windows-2022
             os_name: windows
             arch: x64
           - runner: macos-15-intel
@@ -78,28 +86,6 @@ jobs:
       - name: Set package version from tag
         shell: bash
         run: npm pkg set version="${{ env.GIT_VER }}"
-
-      # The Windows leg's repeated hangs (see job comment above) were
-      # traced to dead stops right around electron-builder downloading/
-      # extracting/signing freshly-created executables — the signature of
-      # Windows Defender's real-time scanner interfering with those
-      # files. `Set-MpPreference -DisableRealtimeMonitoring` looked like
-      # a fix (ran with no error) but had zero real effect and the hang
-      # recurred anyway: GitHub's hosted Windows runners have Defender
-      # Tamper Protection on, which silently no-ops that toggle — their
-      # own runner-images docs say Defender can't be disabled, only
-      # excluded from. Exclusions ARE honored, so exclude the paths
-      # electron-builder actually writes/downloads into instead.
-      - name: Exclude build paths from Windows Defender scanning
-        if: runner.os == 'Windows'
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath "${{ github.workspace }}"
-          Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\electron-builder\Cache"
-          Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\Temp"
-          Add-MpPreference -ExclusionProcess "electron-builder.exe"
-          Add-MpPreference -ExclusionProcess "makensis.exe"
-          Add-MpPreference -ExclusionProcess "signtool.exe"
 
       # Builds natively for whatever OS/arch this runner already is — no
       # explicit --win/--mac/--linux or --x64/--arm64 flags needed, since

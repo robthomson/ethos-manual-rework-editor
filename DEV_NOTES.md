@@ -302,27 +302,33 @@ repo:**
   194KB stub instead of a real ~88MB installer. That failure signature —
   dead stop / vanished file right after a signtool pass on a fresh
   unsigned exe — is the known pattern for Windows Defender's real-time
-  scanner grabbing or quarantining the file, not a bug in this project's
-  config (a documented issue for Electron+NSIS builds on Windows CI
-  runners generally). First attempt: `Set-MpPreference
-  -DisableRealtimeMonitoring $true` as a Windows-only step before the
-  build step. **Re-verified in CI (retagged `release/0.2.0`) — still
-  hung**, cancelled again at the 25-minute wall, but at a *different*
+  scanner grabbing or quarantining the file — that was the leading
+  theory initially, but turned out to be wrong (see below). First
+  attempt: `Set-MpPreference -DisableRealtimeMonitoring $true` as a
+  Windows-only step. **Re-verified in CI (retagged `release/0.2.0`) —
+  still hung**, cancelled again at the 25-minute wall, at a *different*
   point this time (right after downloading the NSIS packaging tool
-  itself, before signtool ever ran) — same class of AV interference,
-  just unlucky timing. The step itself ran with no error, which was the
-  giveaway: GitHub's hosted Windows runners have Defender **Tamper
-  Protection** on, which silently no-ops `-DisableRealtimeMonitoring`
-  entirely (their own runner-images docs say Defender can't be disabled
-  on hosted runners, only excluded from). Switched to
-  `Add-MpPreference -ExclusionPath`/`-ExclusionProcess` instead —
-  exclusions *are* honored under Tamper Protection — covering the repo
-  workspace, electron-builder's cache dir, and the temp dir, plus
-  process exclusions for `electron-builder.exe`/`makensis.exe`/
-  `signtool.exe`. Kept `signAndEditExecutable: false` too (still a real,
-  if partial, reduction in signtool calls). **Not yet re-verified in
-  CI** — needs another retagged run to confirm the Windows leg actually
-  completes now.
+  itself, before signtool ever ran). Suspected Defender Tamper
+  Protection silently no-op'ing the toggle (GitHub's hosted Windows
+  runners can't have Defender disabled, only excluded from, per their
+  own runner-images docs) and switched to `Add-MpPreference
+  -ExclusionPath`/`-ExclusionProcess` instead — **re-verified again,
+  still hung, at the exact same byte-for-byte point as the previous
+  attempt** (`downloaded nsis-3.0.4.1.7z`, then dead silence). Two
+  different Defender mitigations producing an identical, deterministic
+  stall (not the varying timing an AV race would produce) ruled out
+  Defender entirely. The actual cause: `windows-latest` had just moved
+  to a brand-new Windows Server 2025 image (`win25/...`, confirmed via
+  the `actions/runner-images` releases feed) — a fresh-image
+  incompatibility with electron-builder's bundled NSIS/7z tooling, not
+  antivirus at all. Fixed by pinning the matrix to `windows-2022` (a
+  known-stable prior image) in all three workflows instead of chasing
+  the new image further; removed both now-disproven Defender steps.
+  Kept `signAndEditExecutable: false` (still a real, if unrelated,
+  reduction in signtool calls) and the 25-minute timeout (a good safety
+  net regardless of root cause). **Not yet re-verified in CI** — needs
+  another retagged run to confirm the Windows leg actually completes on
+  `windows-2022`.
 - **Image handling**: relative image `src`s resolve to real
   raw.githubusercontent.com URLs, replicating `mkdocs.yml`'s actual
   `i18n: fallback_to_default: true` config — a locale-specific screenshot
