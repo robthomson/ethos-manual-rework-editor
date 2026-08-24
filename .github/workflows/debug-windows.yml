@@ -75,3 +75,14 @@ jobs:
           & $sza x "$env:RUNNER_TEMP\nsis.7z" "-o$env:RUNNER_TEMP\nsis-extracted" -y
           Write-Host "Exit code: $LASTEXITCODE"
           Get-ChildItem "$env:RUNNER_TEMP\nsis-extracted" | Select-Object -First 5
+
+      # The two probes above proved the download+extraction operation
+      # itself is instant when PowerShell spawns app-builder.exe directly.
+      # This replicates electron-builder's OWN internal call exactly
+      # (Node.js spawning app-builder.exe via builder-util's
+      # executeAppBuilder(), not PowerShell) to isolate whether the
+      # Node-driven spawn specifically is what hangs.
+      - name: Probe Node-driven spawn of app-builder.exe (exact electron-builder code path)
+        shell: bash
+        timeout-minutes: 5
+        run: node debug-node-spawn.js
