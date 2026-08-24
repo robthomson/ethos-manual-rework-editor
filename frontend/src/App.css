@@ -882,3 +882,64 @@
   padding: 0.1rem 0 0.1rem 1rem;
   color: #555;
 }
+
+/* Admonition/details rendering in Rich mode (pymdownxViews.ts's
+   NodeViews) — same values as .rendered-preview's own admonition/details
+   rules above, just re-scoped to the editable surface, so a page looks
+   the same whether you're viewing it in Preview or editing it in Rich.
+   .admonition-title is a real <input> (see pymdownxViews.ts's own
+   comment on why, not a contenteditable div) — reset to blend into the
+   box rather than look like a normal form field. */
+.wysiwyg-scroll [contenteditable="true"] .admonition {
+  border-left: 4px solid #448aff;
+  background: #f4f8ff;
+  padding: 0.6rem 0.9rem;
+  margin: 0.9rem 0;
+  border-radius: 2px;
+}
+
+.wysiwyg-scroll [contenteditable="true"] .admonition-title {
+  display: block;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0 0 0.3rem 0;
+  font: inherit;
+  font-weight: 700;
+  color: inherit;
+  outline: none;
+}
+
+.wysiwyg-scroll [contenteditable="true"] .admonition-title::placeholder {
+  color: inherit;
+  opacity: 0.5;
+}
+
+.wysiwyg-scroll [contenteditable="true"] .admonition.warning,
+.wysiwyg-scroll [contenteditable="true"] .admonition.caution {
+  border-left-color: #ff9100;
+  background: #fff8f0;
+}
+
+.wysiwyg-scroll [contenteditable="true"] .admonition.danger {
+  border-left-color: #ff5252;
+  background: #fff2f2;
+}
+
+.wysiwyg-scroll [contenteditable="true"] .admonition.tip {
+  border-left-color: #1a7f37;
+  background: #f0fff4;
+}
+
+.wysiwyg-scroll [contenteditable="true"] details {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 0.5rem 0.9rem;
+  margin: 0.9rem 0;
+}
+
+.wysiwyg-scroll [contenteditable="true"] details summary {
+  cursor: pointer;
+  outline: none;
+}
