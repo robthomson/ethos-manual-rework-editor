@@ -403,9 +403,79 @@ repo:**
   untouched and still correct — this only ever failed in CI, never
   locally, across every attempt this session) is now built locally per
   release and uploaded by hand via `gh release upload` — documented in
-  `README.md`'s Releasing section. Revisit if GitHub's Windows runner
-  images change, or if this is worth a proper `tmate` debugging session
-  later.
+  `README.md`'s Releasing section.
+  **Resolved, a later session** — the proper `tmate` debugging session
+  above happened for real: a throwaway `debug-windows-tmate.yml`
+  (`workflow_dispatch`, drops into an interactive `tmate` shell right
+  before the packaging step) let a human attach directly to a live
+  hung runner and actually inspect it, something none of the 8 prior
+  unattended cycles could do. Real findings, checked live, not guessed:
+  - The "hung" process (`7za.exe`) was never actually stuck — `Get-Process
+    -Id <pid> | Select Threads` showed its one thread in `Running` state
+    (not any `Wait` state), and its CPU time and working set were both
+    climbing steadily on repeated checks. It was doing real, ongoing
+    work the whole time.
+  - Its real command line (`Get-CimInstance Win32_Process`) was
+    `7za.exe a -bd -mx=9 -mtc=off -mtm=off -mta=off ... .nsis.7z .` —
+    **compressing** (`a` = add) the entire `win-unpacked` output
+    directory at **maximum LZMA compression**, **single-threaded**
+    (`-mt*=off`), not downloading/extracting anything (the original
+    working theory, from `nsis-3.0.4.1.7z` being the last thing logged
+    before earlier cycles' silence, turned out to be a red herring —
+    that log line was just the last thing printed before this much
+    bigger, slower step, not the step that was actually slow).
+  - Reading `app-builder-lib`'s own source (`targets/archive.js`)
+    directly: for `.7z`-format output specifically, electron-builder
+    hard-codes `-mx=9` — the top-level `compression: "store"/"normal"`
+    config option (which the code otherwise supports) is silently
+    ignored for this format; it only affects `.zip` output. **Tested
+    live** via the escape hatch visible in that same source
+    (`process.env.ELECTRON_BUILDER_COMPRESSION_LEVEL` overrides `-mx=`
+    directly): re-ran with `ELECTRON_BUILDER_COMPRESSION_LEVEL=1` in the
+    same session — CPU time climbed at essentially the same rate as at
+    the default level 9. **Compression level was not the bottleneck.**
+  - Windows Defender was checked directly too (`Get-MpPreference`) —
+    `DisableRealtimeMonitoring: True`, `ExclusionPath: {C:\, D:\}` —
+    already fully disabled and excluded by GitHub's own default runner
+    image, before any of this project's own workflow steps ever ran.
+    Conclusively rules Defender out, not just via a possibly-incomplete
+    exclusion path like the three earlier attempts.
+  - What's actually large: `win-unpacked` held 2038 files (~300MB) —
+    ordinary for an Electron app — but 1933 of those (95%) were under
+    `backend/node_modules`, bundled in raw (not asar-packed, since the
+    backend runs as a real spawned Node process) via `extraResources`.
+    That includes `typescript`, `ts-node-dev`, and `ts-node-dev`'s own
+    substantial transitive-only tree (`ts-node`, `resolve`,
+    `@jridgewell/*`, `diff`, `source-map`, `dynamic-dedupe`, 100+ files
+    on their own) — none of it ever needed at runtime (`tsc` already
+    compiled `backend/dist` ahead of time; `ts-node-dev` only exists for
+    `npm run dev`). **Root cause: per-file I/O overhead on this shared
+    runner's storage, multiplied across ~1900 files that shouldn't have
+    shipped at all** — not a deadlock, not compression settings, not
+    antivirus.
+  - **Fix**: `scripts/prepare-backend-prod-modules.js` builds a
+    genuinely separate `backend/node_modules.prod/` via a real
+    `npm ci --omit=dev` (wired in as part of `predist`), and
+    `extraResources` now bundles *that* instead of the developer's own
+    `backend/node_modules` (which still needs its devDependencies for
+    `npm run dev`/`build:backend`, so it can't be pruned in place). A
+    first attempt used a hand-maintained `extraResources` `filter` glob
+    list instead (exclude just `typescript/`/`ts-node-dev/`/`@types/`)
+    — only cut file count by 17% (2038→1601), missing `ts-node-dev`'s
+    transitive-only tree entirely, which sits as separate top-level
+    packages in npm's flat layout. The real `npm ci --omit=dev` fix cut
+    it by 54% (2038→930/932) — npm's own resolver correctly excludes
+    every devDependency-only package, direct or transitive, with no
+    guesswork. Verified locally, not just by file count: ran the
+    packaged backend directly (same plain-Node harness used earlier
+    this session to verify the GitHub sign-in packaging fix) against
+    the pruned `node_modules` — `/api/health`, the real GitHub
+    device-flow start, and a live GitHub-API-backed route
+    (`/api/nav/branches`, exercises `fs-extra`/`js-yaml`) all worked
+    correctly. Validated end-to-end on a real Windows CI runner via
+    `debug-windows-timed-dist.yml` (unattended, just times the real
+    `npm run dist` — see that workflow's own comment) before re-adding
+    Windows to the real build matrices.
 - **Image handling**: relative image `src`s resolve to real
   raw.githubusercontent.com URLs, replicating `mkdocs.yml`'s actual
   `i18n: fallback_to_default: true` config — a locale-specific screenshot
