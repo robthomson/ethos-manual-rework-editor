@@ -15,7 +15,7 @@ branch/language/page browsing, local editing (autosaving, no explicit "create
 a workspace" step needed), and committing + opening a pull request are all
 wired up. See `DEV_NOTES.md` for the full architecture writeup and what's not
 built yet (a diff-vs-English view, spellcheck, and rich-mode support for
-admonitions/tabs are the main gaps).
+tabs are the main gaps).
 
 ## Signing in
 
@@ -54,15 +54,7 @@ None of these are code-signed yet, so Windows SmartScreen / macOS Gatekeeper
 will warn on first launch ("keep anyway" / "open anyway").
 
 Every push to `main` and every PR also builds (but doesn't release) the same
-binaries — macOS and Linux only; see below for why Windows isn't automated.
-
-**Windows isn't built by CI.** `npm run dist` reproducibly hangs partway
-through electron-builder's packaging step on GitHub-hosted Windows runners —
-confirmed, via extensive isolated diagnostics, to not be caused by the runner
-OS image, the Windows target type, or Windows Defender (see `DEV_NOTES.md` for
-the full investigation). It builds reliably on a real Windows machine, so the
-Windows asset for each release is built locally and uploaded by hand (see
-Releasing below).
+binaries — Windows, macOS, and Linux, fully automated.
 
 ## Developer setup
 
@@ -111,12 +103,6 @@ workflow runs; there's no separate manual packaging step to keep in sync.
 - Add a matching `## <version>` section to `Releases.md` before tagging —
   `.github/scripts/extract-release-notes.py` pulls that section verbatim
   into the release notes.
-- `release/<version>` tag → a real GitHub Release, built for macOS
-  (Intel/Apple Silicon) and Linux (x64/arm64), notes pulled from
-  `Releases.md`.
-- Windows isn't built by that workflow (see Download above) — build and
-  attach it by hand once the release exists:
-  ```bash
-  npm run dist                                             # on a Windows machine
-  gh release upload release/<version> "release/Ethos-Manual-Editor-<version>-win-x64.exe"
-  ```
+- `release/<version>` tag → a real GitHub Release, built for Windows,
+  macOS (Intel/Apple Silicon), and Linux (x64/arm64), notes pulled from
+  `Releases.md`. Fully automated — no manual build/upload step.

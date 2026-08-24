@@ -8,7 +8,6 @@ jobs:
   build-app:
     name: Build PR (${{ matrix.os_name }}-${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
-    # See release.yml's own comment for why Windows isn't in this matrix.
     timeout-minutes: 25
     strategy:
       fail-fast: false
@@ -26,6 +25,9 @@ jobs:
           - runner: ubuntu-24.04-arm
             os_name: linux
             arch: arm64
+          - runner: windows-2022
+            os_name: win
+            arch: x64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -96,4 +98,12 @@ jobs:
           path: |
             release/*.AppImage
             release/*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload app artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ethos-manual-editor-${{ env.GIT_VER }}-${{ env.OS_NAME }}-${{ env.ARCH_NAME }}
+          path: release/*.exe
           if-no-files-found: error

@@ -472,10 +472,22 @@ repo:**
     the pruned `node_modules` — `/api/health`, the real GitHub
     device-flow start, and a live GitHub-API-backed route
     (`/api/nav/branches`, exercises `fs-extra`/`js-yaml`) all worked
-    correctly. Validated end-to-end on a real Windows CI runner via
-    `debug-windows-timed-dist.yml` (unattended, just times the real
-    `npm run dist` — see that workflow's own comment) before re-adding
-    Windows to the real build matrices.
+    correctly.
+  - **Confirmed on a real Windows CI runner**, unattended, with each
+    phase timed separately (a first combined `time npm run dist` run
+    was cancelled at 41+ minutes still stuck on that one step, with no
+    visibility into whether the fix even helped): install ~28s, build
+    13.4s, predist 2.4s, **electron-builder (the actual packaging step)
+    1m17s** — total, checkout to finished `.exe`, about 2m23s. Down
+    from 40+ minutes (still running when cancelled) / historically as
+    long as 1h24m, or killed by the old 25-minute timeout on every
+    other cycle. Windows re-added to all three workflows' matrices
+    (`push.yml`/`pr.yml`/`release.yml`) with that same 25-minute
+    timeout — now a comfortable margin instead of a wall it always hit
+    — and both throwaway `debug-windows-*.yml` diagnostic workflows
+    deleted. `README.md`'s "Windows isn't built by CI" section and the
+    manual `gh release upload` step removed accordingly; the fully
+    automated release flow now covers Windows/macOS/Linux uniformly.
 - **Image handling**: relative image `src`s resolve to real
   raw.githubusercontent.com URLs, replicating `mkdocs.yml`'s actual
   `i18n: fallback_to_default: true` config — a locale-specific screenshot
