@@ -482,71 +482,105 @@ repo:**
   round-trips as `-`.
 
 **Not built yet:**
-- **Custom nodes for pymdownx blocks in Rich mode** (admonitions/details/
-  tabs) — see the dedicated section below; the approach is researched and
-  written up, not yet implemented.
+- **Custom nodes for pymdownx tabs in Rich mode** — admonitions/details
+  are now built (see the dedicated section below, updated from
+  "researched, not yet built"); tabs (`=== "Label"`) still aren't, and
+  pages containing one still gate to Source mode. No confirmed real
+  usage of tabs in `ethos-manual-rework` today, so this costs little in
+  practice.
 - Spellcheck-in-editor.
 - Structural insert helpers as UI (a toolbar to insert an admonition/
   table/tab without hand-typing syntax) — Rich mode now has a basic
-  formatting toolbar (Bold/Italic/Link/Image), but nothing yet for
-  admonitions/tables/tabs specifically (those need the custom-node work
-  below first, since Rich mode can't represent them at all yet).
+  formatting toolbar (Bold/Italic/Link/Image), but nothing yet to insert
+  a *new* admonition/details/table/tab; editing an *existing* one is
+  fully supported now that the custom-node work below landed. Insert
+  helpers are a separate, smaller follow-up whenever wanted.
 - The diff-vs-English view.
 - **Not machine-verified**: the actual browse/drag/paste interaction in
   the image-upload modal (upload/list/serve endpoints themselves were
   tested directly against the API).
 
-## pymdownx blocks in Rich mode (researched, not yet built)
+## pymdownx admonitions/details in Rich mode (built)
 
-Milkdown's default schema has no concept of `!!! type "Title"` admonitions,
-`??? .../???+ ...` collapsible details, or `=== "Label"` tabs — and
-CommonMark's own "lazy continuation" rule means a page containing one,
-edited in a generic rich-text editor with no custom handling, would have
-its whole `!!!`/indented-body structure silently flattened into a plain
-paragraph the moment it's saved. That's real data loss, not a display
-quirk, which is why `containsPymdownxBlocks()` currently gates those pages
-to Source mode instead. The research below is the path to lifting that
-gate for real, not a rewrite of the approach:
+Milkdown's default schema has no concept of `!!! type "Title"` admonitions
+or `??? .../???+ ...` collapsible details — and CommonMark's own "lazy
+continuation" rule means a page containing one, edited in a generic
+rich-text editor with no custom handling, would have its whole
+`!!!`/indented-body structure silently flattened into a plain paragraph
+the moment it's saved. That's real data loss, not a display quirk, which
+is why `containsPymdownxBlocks()` used to gate those pages to Source mode
+entirely — it now only gates on tabs (`=== "Label"`, still unsupported;
+see below).
 
-1. **Parsing**: reuse `preprocessPymdownxBlocks()` unchanged (it already
-   rewrites `!!!`/`===` blocks into blockquote-form text +
-   line-numbered markers, specifically so CommonMark parses nested
-   markdown inside them correctly — the same trick the live preview
-   already relies on). Register a Milkdown-specific remark plugin (via
-   `@milkdown/utils`'s `$remark`) that retags the resulting `blockquote`
-   mdast nodes matching those markers — same line-position matching
-   `pymdownxBlocks.ts:remarkPymdownxBlocks()` already does for the
-   preview, just setting mdast `data` instead of hast `hName`/
-   `hProperties`.
-2. **Schema**: `$nodeSchema("admonition", ...)` etc. (via
-   `@milkdown/utils`) with `type`/`title` as node **attrs** (not child
-   nodes), `content: "block+"` for the body, and a `parseMarkdown.match`
-   checking for that retagged mdast type.
-3. **Serializing back to real pymdownx syntax** — confirmed feasible by
-   reading Milkdown's own built-in `blockquote` node
-   (`@milkdown/preset-commonmark`'s bundled source): its `toMarkdown`
-   runner is just `state.openNode("blockquote").next(node.content).closeNode()`
-   — it builds a *real* mdast `blockquote` node and lets
-   `remark-stringify`'s own built-in compiler (which already knows how
-   to prefix every line with `> `) do the formatting. There's no
-   built-in mdast type that does 4-space-indent-the-children the way
-   pymdownx needs, so admonitions need one more piece: a custom
-   `mdast-util-to-markdown` extension (the same standard mechanism
-   `remark-gfm`/`remark-frontmatter` themselves use — register via a
-   remark plugin pushing onto the processor's `toMarkdownExtensions`
-   data) providing a handler for the custom mdast type, using that
-   package's own `indentLines`/`containerFlow` helpers (the same ones
-   `blockquote`'s internal handler uses, just with a 4-space `map`
-   instead of `> `) to emit `!!! type "Title"\n` + the indented,
-   normally-serialized body.
-4. **NodeView**: a React component rendering the styled box (title bar +
-   editable body), reusing the same CSS classes the live preview already
-   has (`.admonition`, `.admonition-title`, etc. — see `App.css`).
+Caught live testing the macOS build: a page with an admonition made the
+Rich button permanently un-clickable, surfacing this as a real gap rather
+than a theoretical one. Implemented as three files under
+`frontend/src/wysiwyg/`, matching the previously-researched approach
+almost exactly (confirmed via two Explore agents reading the actual
+installed Milkdown 7.22.1 source before writing any code, not guessing at
+API shapes):
 
-Tabs are lower priority than admonitions/details specifically: no
-confirmed real usage of `=== "Label"` anywhere in `ethos-manual-rework`
-today (admonitions are heavily used — confirmed — details/tabs are not),
-so gating them out costs little in practice right now.
+- **`pymdownxSchema.ts`**: `$nodeSchema("admonition"/"details", ...)`,
+  `type`/`title` as node **attrs** (not child nodes — title is a literal
+  quoted string in the source, never itself markdown-formatted, so this
+  loses nothing), `content: "block+"` for the body. Modeled directly on
+  `@milkdown/preset-commonmark`'s real `blockquote`/`code-block` schemas.
+- **`pymdownxRemark.ts`**: a `$remark`-wrapped plugin reusing
+  `preprocessPymdownxBlocks()`'s marker-matching logic (same
+  `byLine`-position matching `pymdownxBlocks.ts:remarkPymdownxBlocks()`
+  uses for the preview) but retagging `node.type` for real
+  (`"admonition"`/`"details"`) instead of setting hast-only
+  `hName`/`hProperties` — Milkdown's own parse pipeline never runs
+  remark-rehype at all, so it dispatches on real `node.type`. Also holds
+  the `toMarkdown` handlers (`admonitionToMarkdownHandler`/
+  `detailsToMarkdownHandler`) registered into
+  `remarkStringifyOptionsCtx`'s `handlers` field (a real, public
+  extension point — no deep import into `mdast-util-to-markdown`'s own
+  internals needed, since its `exports` field blocks that anyway; `State`
+  already carries `indentLines`/`containerFlow` bound as handler args).
+  Modeled on that package's own built-in blockquote handler, 4-space
+  `map` instead of `"> "`.
+- **`pymdownxViews.ts`**: hand-written plain-DOM `NodeView` classes, not
+  React — confirmed via research that `@milkdown/react` (this version)
+  has no NodeView bridge at all (only `@milkdown/components`, which is
+  Vue-based) and no `@prosemirror-adapter` package exists in this
+  dependency tree. The title bar is a `contenteditable` element *outside*
+  `contentDOM` (so ProseMirror's mutation observer never tries to manage
+  it), synced to the node's `title` attr via `tr.setNodeAttribute` on
+  blur — a standard ProseMirror pattern for an externally-editable
+  non-content region.
+
+**A real round-trip bug caught before shipping**: `preprocessPymdownxBlocks()`
+used to bake a capitalized-type fallback title (e.g. `"Warning"`) directly
+into the marker when no title was given in the source — meaning an
+untouched `!!! warning` (no title) would round-trip through Rich mode as
+`!!! warning "Warning"`, a spurious diff on save even with zero real
+edits. Fixed by keeping the marker's `title` genuinely empty in that case
+and moving the capitalized-fallback to *display* time only, in two
+places that both need to agree: `remarkPymdownxBlocks()` (preview) and
+`pymdownxViews.ts`'s NodeViews (a CSS `:empty::before` placeholder via
+`data-placeholder`, not real DOM text — pre-filling the actual
+contenteditable text would make a plain focus+blur with no edit look
+identical to the user having typed that text).
+
+**Verified via a standalone jsdom round-trip script** (not committed —
+built the real `Editor.make()` chain from `WysiwygEditor.tsx` headlessly,
+parsed real admonition/details markdown, serialized it back out, diffed
+byte-for-byte against the original): basic admonition with a title/link/
+two paragraphs, no-title fallback, collapsed details, open-by-default
+details all matched exactly. One case — an admonition nested inside a
+list item — did *not* match byte-for-byte, but an isolated control test
+(plain nested paragraph, zero admonition code involved) reproduced the
+identical reformatting (list continuation indent renormalized to the
+bullet marker's own width) — confirming it's a pre-existing
+`remark-stringify` characteristic of Rich mode in general, not a
+regression from this work.
+
+Tabs are still not supported — no confirmed real usage of `=== "Label"`
+anywhere in `ethos-manual-rework` today (admonitions are heavily used —
+confirmed — details/tabs are not), so gating them out costs little in
+practice. `containsPymdownxBlocks()` narrowed accordingly (only checks
+`TAB_RE` now).
 
 ## Key architecture decisions (and why)
 

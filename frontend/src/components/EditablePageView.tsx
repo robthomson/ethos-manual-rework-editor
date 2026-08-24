@@ -29,13 +29,14 @@
  *   WYSIWYG — WysiwygEditor.tsx/Milkdown), Source (plain textarea), and
  *   Preview (rendered, read-only, reflecting current in-progress
  *   content — not the last-saved version). Rich is disabled — falling
- *   back to Source — for any page containing pymdownx-specific syntax
- *   (admonitions/details/tabs): see pymdownxBlocks.ts:
- *   containsPymdownxBlocks()'s own comment for why that's not just a
- *   missing-feature limitation but an active data-loss risk with a
- *   generic rich-text editor. A page defaults to Rich mode on load when
- *   it's safe to, since that's the actual point of building it; Source
- *   otherwise.
+ *   back to Source — only for a page containing a pymdownx tab block
+ *   (`=== "Label"`): admonitions/details have real custom-node support
+ *   in Rich mode now (frontend/src/wysiwyg/pymdownxSchema.ts et al.);
+ *   tabs still don't, see pymdownxBlocks.ts:containsPymdownxBlocks()'s
+ *   own comment for why that's not just a missing-feature limitation but
+ *   an active data-loss risk with a generic rich-text editor. A page
+ *   defaults to Rich mode on load when it's safe to, since that's the
+ *   actual point of building it; Source otherwise.
  *
  *   The English reference pane also has its own Source/Preview toggle
  *   (EnglishModeToggle) — this editing view never had one at all before,
@@ -123,7 +124,7 @@ function PaneModeToggle({
         disabled={richDisabled}
         title={
           richDisabled
-            ? "This page has admonitions/tabs — rich editing for those isn't built yet, to avoid corrupting them. Edit in Source."
+            ? "This page has tabs — rich editing for those isn't built yet, to avoid corrupting them. Edit in Source."
             : undefined
         }
         onClick={() => onChange("rich")}

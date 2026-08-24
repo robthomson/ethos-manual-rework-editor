@@ -67,15 +67,19 @@ import type { Root, BlockContent } from "mdast";
 const ADMONITION_RE = /^(\s*)(!!!|\?\?\?\+?)\s+(\S+)(?:\s+"([^"]*)")?\s*$/;
 const TAB_RE = /^(\s*)===\s+"([^"]*)"\s*$/;
 
-// Used by EditablePageView.tsx's safety gate: a generic contentEditable
-// WYSIWYG editor (frontend/src/wysiwyg/) has no custom handling for this
-// syntax at all yet, and CommonMark's own "lazy continuation" rule means
-// naively round-tripping a page containing it would silently flatten the
-// `!!!`/indented-body structure into a plain paragraph on save — real
-// data loss, not just a display quirk. Pages that match stay in Source
-// mode until real custom-node support exists (see DEV_NOTES.md).
+// Used by EditablePageView.tsx's safety gate. Admonitions/details now
+// have real custom-node support in Rich mode (frontend/src/wysiwyg/
+// pymdownxSchema.ts/pymdownxRemark.ts/pymdownxViews.ts), so this only
+// gates on tabs now — narrowed from also checking ADMONITION_RE, which
+// it did before that support existed. Tabs still have no custom-node
+// handling at all: CommonMark's own "lazy continuation" rule means
+// naively round-tripping a page containing one would silently flatten
+// its `=== "Label"`/indented-body structure into a plain paragraph on
+// save — real data loss, not just a display quirk. No confirmed real
+// usage of tabs in ethos-manual-rework today, so gating them out costs
+// little in practice (see DEV_NOTES.md).
 export function containsPymdownxBlocks(source: string): boolean {
-  return source.split("\n").some((line) => ADMONITION_RE.test(line) || TAB_RE.test(line));
+  return source.split("\n").some((line) => TAB_RE.test(line));
 }
 
 export type BlockMarker =
@@ -150,7 +154,16 @@ export function preprocessPymdownxBlocks(source: string): PreprocessResult {
     if (admonitionMatch) {
       const [, indent, marker, type, titleAttr] = admonitionMatch;
       const isDetails = marker.startsWith("?");
-      const title = titleAttr ?? type.charAt(0).toUpperCase() + type.slice(1);
+      // "" (not the capitalized-type fallback) when no title was given —
+      // that fallback is a *display* concern (applied by
+      // remarkPymdownxBlocks below, and by wysiwyg/pymdownxViews.ts's
+      // NodeViews), not something to bake into the marker itself. Baking
+      // it in here used to mean an admonition with no explicit title
+      // would round-trip through Rich mode as `!!! type "Type"` — a
+      // spurious diff on save even when nothing was actually edited,
+      // since wysiwyg/pymdownxRemark.ts's toMarkdown handlers only omit
+      // the quoted title when it's genuinely empty.
+      const title = titleAttr ?? "";
       i++;
       const body = collectBody(indent);
       const outputLine = emitBlock(indent, body);
@@ -217,15 +230,22 @@ export const remarkPymdownxBlocks: Plugin<[BlockMarker[]], Root> = (markers) => 
 
       const data = node.data || (node.data = {});
 
+      // marker.title is "" when no explicit title was given in the
+      // source (see preprocessPymdownxBlocks()'s own comment) — the
+      // capitalized-type fallback below is applied here, at display time
+      // only, so it never gets baked into data that Rich mode's
+      // serializer might write back out.
       if (marker.kind === "admonition") {
+        const displayTitle = marker.title || marker.type.charAt(0).toUpperCase() + marker.type.slice(1);
         data.hName = "div";
         data.hProperties = { className: ["admonition", marker.type] };
         node.children.unshift({
           type: "paragraph",
           data: { hName: "div", hProperties: { className: ["admonition-title"] } },
-          children: [{ type: "text", value: marker.title }],
+          children: [{ type: "text", value: displayTitle }],
         });
       } else if (marker.kind === "details") {
+        const displayTitle = marker.title || marker.type.charAt(0).toUpperCase() + marker.type.slice(1);
         // Real <details>/<summary> — free native collapse/expand, and
         // pymdownx's "???+" (open by default) vs "???" (collapsed)
         // maps directly onto the one HTML attribute that already means
@@ -238,7 +258,7 @@ export const remarkPymdownxBlocks: Plugin<[BlockMarker[]], Root> = (markers) => 
         node.children.unshift({
           type: "paragraph",
           data: { hName: "summary", hProperties: {} },
-          children: [{ type: "text", value: marker.title }],
+          children: [{ type: "text", value: displayTitle }],
         });
       } else {
         data.hName = "div";

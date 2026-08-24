@@ -9,20 +9,25 @@
  *   visible markdown syntax.
  *
  * Info:
- *   Only ever mounted for content EditablePageView.tsx has already
- *   confirmed doesn't contain pymdownx-specific syntax (see
- *   pymdownxBlocks.ts:containsPymdownxBlocks()) — CommonMark's own
- *   "lazy continuation" rule means a page with a `!!!` admonition would
- *   have its `!!!`/indented-body structure silently flattened into a
- *   plain paragraph on save if edited here, since neither Milkdown's
- *   default schema nor its default markdown serializer know that syntax
- *   exists. That's real data loss, not a display quirk, so those pages
- *   stay in Source mode until real custom-node support for
- *   admonitions/details/tabs is built (documented, not yet done — see
- *   DEV_NOTES.md for the researched approach: reuse
- *   preprocessPymdownxBlocks()'s text rewrite + a custom
- *   mdast-util-to-markdown extension, mirroring how Milkdown's own
- *   built-in blockquote node round-trips).
+ *   Admonitions/details (`!!!`/`???`/`???+`) are now real custom nodes —
+ *   see pymdownxSchema.ts/pymdownxRemark.ts/pymdownxViews.ts for the full
+ *   three-piece round trip (ProseMirror<->mdast schema, mdast retagging,
+ *   and the plain-DOM NodeViews that render/edit them) and this file's
+ *   own wiring below. Tabs (`=== "Label"`) are still NOT supported here —
+ *   pages containing one stay gated to Source mode
+ *   (pymdownxBlocks.ts:containsPymdownxBlocks(), narrowed to only check
+ *   for tabs now) since no confirmed real usage exists in
+ *   ethos-manual-rework today to justify the extra work.
+ *
+ *   Unlike plain CommonMark, admonitions/details need their raw markdown
+ *   preprocessed *before* Milkdown's own parser ever sees it —
+ *   preprocessPymdownxBlocks() (reused unchanged from the preview
+ *   pipeline) rewrites `!!!`/indented-body text into blockquote-form text
+ *   remark can actually parse, and its `markers` output tells
+ *   pymdownxRemark.ts's editor-side retag plugin which resulting
+ *   blockquote nodes to turn into real "admonition"/"details" mdast
+ *   types. That preprocessed text (not raw `content`) is what actually
+ *   goes into defaultValueCtx below.
  *
  *   Image display resolution: caught live (Rich mode showed every image
  *   broken, while Preview mode worked) — Milkdown's built-in image node
@@ -103,12 +108,20 @@ import {
 import { gfm } from "@milkdown/kit/preset/gfm";
 import { history } from "@milkdown/kit/plugin/history";
 import { listener, listenerCtx } from "@milkdown/kit/plugin/listener";
-import { replaceAll, callCommand } from "@milkdown/kit/utils";
+import { replaceAll, callCommand, $view } from "@milkdown/kit/utils";
 import {
   fetchImageResolutionContext,
   resolveImageSrc,
   type ImageResolutionContext,
 } from "../preview/imageResolver";
+import { preprocessPymdownxBlocks } from "../preview/pymdownxBlocks";
+import { admonitionSchema, detailsSchema } from "./pymdownxSchema";
+import {
+  admonitionRemark,
+  admonitionToMarkdownHandler,
+  detailsToMarkdownHandler,
+} from "./pymdownxRemark";
+import { admonitionView, detailsView } from "./pymdownxViews";
 
 export interface WysiwygEditorHandle {
   toggleBold: () => void;
@@ -162,17 +175,40 @@ function EditorInner({ content, onChange, imageCtx, handleRef }: EditorInnerProp
       };
     });
 
+    // Preprocessed once, at mount, from the initial `content` prop — see
+    // this file's own header comment on why admonitions/details need
+    // this before Milkdown's parser ever runs. `markers` gets threaded
+    // into admonitionRemark's own ctx slice just below, not passed as
+    // static initialOptions, since a later replaceAll (external content
+    // change) needs to refresh both together against whatever it's
+    // parsing at that moment — see the effect below.
+    const { text: initialText, markers: initialMarkers } = preprocessPymdownxBlocks(content);
+
     return Editor.make()
       .config((ctx) => {
         ctx.set(rootCtx, root);
-        ctx.set(defaultValueCtx, content);
+        ctx.set(defaultValueCtx, initialText);
+        ctx.update(admonitionRemark.options.key, () => initialMarkers);
         // remark-stringify's own default is "*" — caught live in a real
         // submitted PR: a one-word edit inside a bullet list produced an
         // 8-line diff, every existing "-" bullet rewritten to "*" for no
         // real reason. This repo's own convention (and CommonMark's, and
         // every other markdown file in it) is "-", so match it instead of
-        // the library default.
-        ctx.update(remarkStringifyOptionsCtx, (prev) => ({ ...prev, bullet: "-" as const }));
+        // the library default. `handlers.admonition`/`.details` are the
+        // custom mdast->markdown-text serializers for the synthetic node
+        // types pymdownxSchema.ts's toMarkdown runners build — see
+        // pymdownxRemark.ts for why this ctx slice (not a deep import
+        // into mdast-util-to-markdown) is the real, public extension
+        // point for that.
+        ctx.update(remarkStringifyOptionsCtx, (prev) => ({
+          ...prev,
+          bullet: "-" as const,
+          handlers: {
+            ...prev.handlers,
+            admonition: admonitionToMarkdownHandler,
+            details: detailsToMarkdownHandler,
+          },
+        }));
         ctx.get(listenerCtx).markdownUpdated((_ctx, markdown, prevMarkdown) => {
           if (markdown === prevMarkdown) return;
           lastContentRef.current = markdown;
@@ -182,6 +218,11 @@ function EditorInner({ content, onChange, imageCtx, handleRef }: EditorInnerProp
       .use(commonmark)
       .use(gfm)
       .use(resolvedImageSchema) // after commonmark, so it overrides that preset's own image node
+      .use(admonitionSchema)
+      .use(detailsSchema)
+      .use(admonitionRemark)
+      .use($view(admonitionSchema.node, () => admonitionView))
+      .use($view(detailsSchema.node, () => detailsView))
       .use(history)
       .use(listener);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -192,7 +233,14 @@ function EditorInner({ content, onChange, imageCtx, handleRef }: EditorInnerProp
     const editor = get();
     if (!editor) return;
     lastContentRef.current = content;
-    editor.action(replaceAll(content));
+    // Same preprocessing needed here as at mount (see this file's own
+    // header comment) — an external content change containing
+    // admonitions/details must refresh admonitionRemark's markers before
+    // the rewritten text is handed to replaceAll, or they'd still be
+    // matched against the *previous* parse's line numbers.
+    const { text, markers } = preprocessPymdownxBlocks(content);
+    editor.action((ctx) => ctx.update(admonitionRemark.options.key, () => markers));
+    editor.action(replaceAll(text));
   }, [content, get]);
 
   function runCommand(command: Parameters<typeof callCommand>[0], payload?: unknown) {

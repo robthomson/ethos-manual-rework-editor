@@ -882,3 +882,62 @@
   padding: 0.1rem 0 0.1rem 1rem;
   color: #555;
 }
+
+/* Admonition/details rendering in Rich mode (pymdownxViews.ts's
+   NodeViews) — same values as .rendered-preview's own admonition/details
+   rules above, just re-scoped to the editable surface, so a page looks
+   the same whether you're viewing it in Preview or editing it in Rich.
+   .admonition-title is a separate nested contenteditable region (see
+   pymdownxViews.ts's own comment on why) — no [contenteditable] styling
+   needed here beyond the shared box rules below, which apply regardless. */
+.wysiwyg-scroll [contenteditable="true"] .admonition {
+  border-left: 4px solid #448aff;
+  background: #f4f8ff;
+  padding: 0.6rem 0.9rem;
+  margin: 0.9rem 0;
+  border-radius: 2px;
+}
+
+.wysiwyg-scroll [contenteditable="true"] .admonition-title {
+  font-weight: 700;
+  margin: 0 0 0.3rem 0;
+  outline: none;
+}
+
+/* Shown only when the title bar is genuinely empty (no explicit title in
+   the source) — see pymdownxViews.ts's own comment on why the
+   capitalized-type default has to stay display-only, never real stored
+   text. */
+.wysiwyg-scroll [contenteditable="true"] .admonition-title:empty::before {
+  content: attr(data-placeholder);
+  opacity: 0.5;
+}
+
+.wysiwyg-scroll [contenteditable="true"] .admonition.warning,
+.wysiwyg-scroll [contenteditable="true"] .admonition.caution {
+  border-left-color: #ff9100;
+  background: #fff8f0;
+}
+
+.wysiwyg-scroll [contenteditable="true"] .admonition.danger {
+  border-left-color: #ff5252;
+  background: #fff2f2;
+}
+
+.wysiwyg-scroll [contenteditable="true"] .admonition.tip {
+  border-left-color: #1a7f37;
+  background: #f0fff4;
+}
+
+.wysiwyg-scroll [contenteditable="true"] details {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 0.5rem 0.9rem;
+  margin: 0.9rem 0;
+}
+
+.wysiwyg-scroll [contenteditable="true"] details summary {
+  font-weight: 700;
+  cursor: text;
+  outline: none;
+}
