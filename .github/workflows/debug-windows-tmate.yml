@@ -1,0 +1,59 @@
+name: Debug Windows CI Hang (tmate)
+
+# Throwaway diagnostic workflow — see DEV_NOTES.md's "Windows CI hang"
+# writeup for the eight-cycle investigation that led here. Every
+# component of electron-builder's Windows packaging step (app-builder.exe,
+# 7za.exe, even electron-builder's own internal download-artifact call)
+# completes instantly in isolation, but the real `npm run dist` pipeline
+# deterministically hangs on GitHub-hosted Windows runners right after
+# downloading nsis-3.0.4.1.7z — never locally. That signature (fine
+# standalone, hangs in the full orchestrated pipeline) is consistent with
+# a stdio pipe backpressure deadlock in the child_process spawn between
+# electron-builder and app-builder.exe, but confirming that (or anything
+# else) needs eyes on the runner while it's actually hung.
+#
+# Builds everything EXCEPT packaging automatically (frontend/backend/
+# electron compile — not what hangs, no point burning tmate time on it),
+# then drops into a tmate session *before* the packaging step so a human
+# can trigger `electron-builder` themselves and watch/diagnose the hang
+# live, rather than the workflow just re-hitting the same wall
+# unattended. Delete this file once the hang is understood/resolved.
+on:
+  workflow_dispatch:
+
+jobs:
+  debug-windows:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          npm install
+          npm --prefix backend install
+          npm --prefix frontend install
+
+      - name: Write backend/.env
+        shell: bash
+        run: echo "GITHUB_CLIENT_ID=${{ secrets.GH_APP_CLIENT_ID }}" > backend/.env
+
+      - name: Build (frontend + backend + electron main — not the part that hangs)
+        shell: bash
+        run: npm run build
+
+      # limit-access-to-actor restricts the SSH connection to whoever
+      # triggered this run (via their GitHub-registered SSH key) — nobody
+      # else can attach to this runner's session.
+      - name: Start tmate session
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true
+        timeout-minutes: 55
