@@ -1,3 +1,11 @@
+## 0.2.1
+
+- Fixed GitHub sign-in not working at all in downloaded builds ("Couldn't
+  start GitHub sign-in") -- a packaging bug meant the app's GitHub Client
+  ID never made it into shipped builds. If sign-in is ever misconfigured
+  again, the app now warns you plainly on launch instead of failing
+  silently.
+
 ## 0.2.0
 
 Complete rewrite as a desktop app (Electron + React), replacing the
