@@ -41,7 +41,8 @@ https://github.com/robthomson/ethos-manual-rework-editor/releases
 ```
 
 Asset names:
-- Windows: `Ethos Manual Editor Setup <version>-x64.exe`
+- Windows: `Ethos Manual Editor <version>-x64.exe` (a portable exe — no
+  installer; just run it, no install/uninstall step)
 - macOS (Intel): `Ethos Manual Editor-<version>.dmg`
 - macOS (Apple Silicon): `Ethos Manual Editor-<version>-arm64.dmg`
 - Linux: `Ethos Manual Editor-<version>-<arch>.AppImage` and

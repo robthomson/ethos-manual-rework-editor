@@ -42,9 +42,9 @@
       { "from": "frontend/dist", "to": "frontend/dist" },
       { "from": "electron/icon.ico", "to": "electron/icon.ico" }
     ],
-    "win": { "target": "nsis", "icon": "electron/icon.ico", "signAndEditExecutable": false },
-    "nsis": {
-      "artifactName": "${productName} Setup ${version}-${arch}.${ext}"
+    "win": { "target": "portable", "icon": "electron/icon.ico", "signAndEditExecutable": false },
+    "portable": {
+      "artifactName": "${productName} ${version}-${arch}.${ext}"
     },
     "mac": { "target": "dmg" },
     "linux": {

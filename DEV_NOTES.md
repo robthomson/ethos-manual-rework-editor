@@ -326,9 +326,26 @@ repo:**
   the new image further; removed both now-disproven Defender steps.
   Kept `signAndEditExecutable: false` (still a real, if unrelated,
   reduction in signtool calls) and the 25-minute timeout (a good safety
-  net regardless of root cause). **Not yet re-verified in CI** — needs
-  another retagged run to confirm the Windows leg actually completes on
-  `windows-2022`.
+  net regardless of root cause). **Re-verified — hung a fourth time, at
+  that exact same line**, this time with the log's own
+  `os=10.0.20348` confirming the pin genuinely took effect (that build
+  number is Server 2022, not the 2025 image) — ruling the runner image
+  out too. Four consecutive CI cycles, two OS generations, two Defender
+  configurations, one constant: electron-builder's own step of
+  extracting/invoking its bundled NSIS packaging tool right after
+  downloading it hangs specifically on GitHub-hosted Windows runners —
+  a real electron-builder/NSIS issue, not something in this project's
+  config, and not practical to root-cause further without a runner
+  shell (tmate/SSH). Given the repeated ~25-minute cost per cycle,
+  asked the user directly rather than guessing at more AV/OS settings;
+  chosen fix: switched the Windows target from `nsis` (installer) to
+  `portable` (single exe, no install/uninstall step) — this sidesteps
+  the broken code path entirely, since the portable target never
+  downloads or invokes NSIS at all. `README.md`'s Windows asset name
+  updated to match (`Ethos Manual Editor <version>-x64.exe`, no more
+  "Setup"). **Not yet re-verified in CI** — needs another retagged run
+  to confirm the portable target actually builds cleanly on a hosted
+  Windows runner.
 - **Image handling**: relative image `src`s resolve to real
   raw.githubusercontent.com URLs, replicating `mkdocs.yml`'s actual
   `i18n: fallback_to_default: true` config — a locale-specific screenshot
