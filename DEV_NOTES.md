@@ -343,9 +343,41 @@ repo:**
   the broken code path entirely, since the portable target never
   downloads or invokes NSIS at all. `README.md`'s Windows asset name
   updated to match (`Ethos Manual Editor <version>-x64.exe`, no more
-  "Setup"). **Not yet re-verified in CI** — needs another retagged run
-  to confirm the portable target actually builds cleanly on a hosted
-  Windows runner.
+  "Setup"). **Re-verified — the portable target ALSO downloads
+  `nsis-3.0.4.1.7z`** (electron-builder's Windows "portable" target turns
+  out to be built on NSIS's one-click portable mode internally, not a
+  separate NSIS-free mechanism as assumed) — hung a fifth time, at that
+  same exact line. Added a throwaway manual-only diagnostic workflow
+  (`debug-windows.yml`, `workflow_dispatch`, deleted once resolved) to
+  test hypotheses in ~1 minute each instead of a full ~25-minute release
+  cycle. Traced the real download+extract mechanism: electron-builder's
+  JS wrapper (`builder-util`'s `executeAppBuilder()`) spawns a bundled
+  native helper, `app-builder.exe` (a precompiled Go binary from
+  `app-builder-bin`, fresh on every CI run since `node_modules` is
+  reinstalled each time), passing it an `SZA_PATH` env var pointing at
+  another bundled binary, `7za.exe` (from `7zip-bin`) — `app-builder.exe`
+  spawns `7za.exe` itself to do the actual extraction. Tested every layer
+  in isolation and **every single one succeeded instantly**: `app-builder
+  --help`, a direct real `7za.exe` extraction of the actual archive, the
+  exact `app-builder.exe download-artifact` invocation with a correct
+  absolute `SZA_PATH` (ruling out a red herring from an earlier attempt
+  with a relative path, which fails fast for an unrelated reason —
+  `app-builder.exe` resolves relative paths against its own internal
+  cache dir, not the caller's cwd), and even a literal Node.js script
+  making electron-builder's *exact* internal call
+  (`require("builder-util").executeAppBuilder(["download-artifact", ...])`)
+  — 515ms, no hang. Every component works alone; only the real, full
+  `npm run dist` hangs, always at the same point. Re-examined the two
+  earlier Defender-exclusion attempts and found a real gap: both excluded
+  `%LOCALAPPDATA%\Temp`, but GitHub's Windows runners redirect the actual
+  TEMP/RUNNER_TEMP to `D:\a\_temp` (confirmed directly in a diagnostic
+  run's own log line — `Downloaded to D:\a\_temp\nsis.7z`) — meaning
+  neither earlier attempt actually excluded the directory where scratch/
+  extraction work happens, so Defender was never properly ruled out
+  despite two "failed" mitigation attempts. Retrying a third Defender
+  mitigation with the corrected path (`$env:RUNNER_TEMP`) plus explicit
+  process exclusions for `app-builder.exe`/`7za.exe` alongside the
+  existing ones. **Not yet re-verified in CI.**
 - **Image handling**: relative image `src`s resolve to real
   raw.githubusercontent.com URLs, replicating `mkdocs.yml`'s actual
   `i18n: fallback_to_default: true` config — a locale-specific screenshot

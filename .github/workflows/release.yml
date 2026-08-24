@@ -87,6 +87,29 @@ jobs:
         shell: bash
         run: npm pkg set version="${{ env.GIT_VER }}"
 
+      # Extensive isolated diagnostics (see DEV_NOTES.md) ruled out the
+      # runner image, the NSIS/portable target choice, and Node's own
+      # child-process spawning of electron-builder's helper binary — every
+      # single component reproduces instantly on its own; only the real,
+      # full `npm run dist` build hangs, always at the same point. The one
+      # earlier Defender-exclusion attempt excluded the wrong temp
+      # directory: GitHub's Windows runners redirect TEMP to `RUNNER_TEMP`
+      # (`D:\a\_temp`), not `%LOCALAPPDATA%\Temp`, which is what got
+      # excluded — so that mitigation was never actually tested correctly.
+      # Retrying with the corrected path.
+      - name: Exclude build paths from Windows Defender scanning
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          Add-MpPreference -ExclusionPath "${{ github.workspace }}"
+          Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\electron-builder\Cache"
+          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
+          Add-MpPreference -ExclusionProcess "electron-builder.exe"
+          Add-MpPreference -ExclusionProcess "app-builder.exe"
+          Add-MpPreference -ExclusionProcess "7za.exe"
+          Add-MpPreference -ExclusionProcess "makensis.exe"
+          Add-MpPreference -ExclusionProcess "signtool.exe"
+
       # Builds natively for whatever OS/arch this runner already is — no
       # explicit --win/--mac/--linux or --x64/--arm64 flags needed, since
       # each matrix entry's host already matches the target (matching how

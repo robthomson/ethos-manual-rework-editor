@@ -64,6 +64,23 @@ jobs:
         shell: bash
         run: npm pkg set version="0.0.0-${{ env.GIT_VER }}"
 
+      # See release.yml's own comment: the earlier Defender-exclusion
+      # attempt excluded the wrong temp directory (GH Windows runners
+      # redirect TEMP to RUNNER_TEMP, i.e. D:\a\_temp) — retrying with the
+      # corrected path.
+      - name: Exclude build paths from Windows Defender scanning
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          Add-MpPreference -ExclusionPath "${{ github.workspace }}"
+          Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\electron-builder\Cache"
+          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
+          Add-MpPreference -ExclusionProcess "electron-builder.exe"
+          Add-MpPreference -ExclusionProcess "app-builder.exe"
+          Add-MpPreference -ExclusionProcess "7za.exe"
+          Add-MpPreference -ExclusionProcess "makensis.exe"
+          Add-MpPreference -ExclusionProcess "signtool.exe"
+
       # Builds natively for whatever OS/arch this runner already is — see
       # release.yml's own comment for why no --win/--mac/--linux or
       # --x64/--arm64 flags are needed.
