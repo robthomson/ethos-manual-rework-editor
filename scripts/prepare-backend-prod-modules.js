@@ -56,10 +56,29 @@ fs.mkdirSync(stagingDir, { recursive: true });
 fs.copyFileSync(path.join(backendDir, "package.json"), path.join(stagingDir, "package.json"));
 fs.copyFileSync(path.join(backendDir, "package-lock.json"), path.join(stagingDir, "package-lock.json"));
 
-execFileSync("npm", ["ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"], {
-  cwd: stagingDir,
-  stdio: "inherit",
-  shell: process.platform === "win32",
-});
+// npm sets npm_execpath (a path to its own JS CLI entry point) in the
+// env of every script it runs -- invoking that directly with the same
+// node binary already running this script (process.execPath) works
+// identically on every platform with no shell involved at all. Tried
+// running "npm"/"npm.cmd" as the command first: on Windows that's a
+// batch file, which execFileSync can't spawn directly without a shell
+// (EINVAL) -- and shell:true works but Node warns it's unsafe with
+// array-form args (unescaped concatenation). npm_execpath sidesteps
+// both problems. Falls back to "npm" via shell:true only for the
+// unusual case of running this script directly, outside any npm
+// lifecycle (npm_execpath then isn't set).
+const npmExecPath = process.env.npm_execpath;
+if (npmExecPath) {
+  execFileSync(process.execPath, [npmExecPath, "ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"], {
+    cwd: stagingDir,
+    stdio: "inherit",
+  });
+} else {
+  execFileSync("npm", ["ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"], {
+    cwd: stagingDir,
+    stdio: "inherit",
+    shell: process.platform === "win32",
+  });
+}
 
 console.log(`prepare-backend-prod-modules: wrote production-only backend deps to ${stagingDir}`);
