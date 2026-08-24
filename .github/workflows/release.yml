@@ -178,7 +178,7 @@ jobs:
       # Windows isn't built here (see build-app job's own comment) — this
       # creates the release with the mac/Linux assets only. The Windows
       # portable exe is built locally and added afterward with:
-      #   gh release upload <tag> "Ethos Manual Editor <version>-x64.exe"
+      #   gh release upload <tag> "Ethos-Manual-Editor-<version>-win-x64.exe"
       - name: Create Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
