@@ -16,7 +16,7 @@
     "build": "npm run build:frontend && npm run build:backend && npm run build:electron",
     "electron:dev": "npm run build:electron && electron .",
     "electron:start": "electron .",
-    "predist": "node -e \"const fs=require('fs');if(!fs.existsSync('backend/.env'))fs.writeFileSync('backend/.env','');\"",
+    "predist": "node -e \"const fs=require('fs');if(!fs.existsSync('backend/.env'))fs.writeFileSync('backend/.env','');\" && node scripts/prepare-backend-prod-modules.js",
     "dist": "npm run build && electron-builder --publish never"
   },
   "devDependencies": {
@@ -38,7 +38,10 @@
     ],
     "extraResources": [
       { "from": "backend/dist", "to": "backend/dist" },
-      { "from": "backend/node_modules", "to": "backend/node_modules" },
+      {
+        "from": "backend/node_modules.prod/node_modules",
+        "to": "backend/node_modules"
+      },
       { "from": "backend/package.json", "to": "backend/package.json" },
       { "from": "backend/.env", "to": "backend/.env" },
       { "from": "frontend/dist", "to": "frontend/dist" },

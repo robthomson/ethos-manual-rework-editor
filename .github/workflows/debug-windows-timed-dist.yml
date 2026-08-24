@@ -1,0 +1,56 @@
+name: Debug Windows CI Hang (timed full dist)
+
+# Throwaway diagnostic workflow, manual-only. Follow-up to
+# debug-windows-tmate.yml's live investigation (see DEV_NOTES.md's
+# "Windows CI hang" writeup) -- that session found the packaging step
+# wasn't actually deadlocked, just extremely slow: 7za.exe compressing
+# the ~2000-file win-unpacked directory (95% of which was backend/
+# node_modules, much of it devDependency-only tooling never needed at
+# runtime) at maximum LZMA compression, single-threaded, on a shared
+# runner core. This workflow validates the fix (a genuinely separate
+# production-only backend/node_modules.prod/, via scripts/
+# prepare-backend-prod-modules.js) by just running the real, full
+# `npm run dist` unattended and timing it -- no interactive tmate
+# needed this time, since the point is to measure, not explore. Delete
+# once the fix is confirmed/merged.
+on:
+  workflow_dispatch:
+
+jobs:
+  timed-dist:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          npm install
+          npm --prefix backend install
+          npm --prefix frontend install
+
+      - name: Write backend/.env
+        shell: bash
+        run: echo "GITHUB_CLIENT_ID=${{ secrets.GH_APP_CLIENT_ID }}" > backend/.env
+
+      - name: Timed full dist (build + package)
+        shell: bash
+        run: |
+          echo "Starting npm run dist at $(date -u +%H:%M:%S)"
+          time npm run dist
+          echo "Finished npm run dist at $(date -u +%H:%M:%S)"
+
+      - name: List build output
+        shell: bash
+        run: ls -la release
+
+      - name: Backend node_modules file count (for comparison against the 1933-file baseline)
+        shell: bash
+        run: find release/win-unpacked/resources/backend/node_modules -type f | wc -l
