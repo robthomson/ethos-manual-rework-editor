@@ -544,11 +544,46 @@ API shapes):
   React — confirmed via research that `@milkdown/react` (this version)
   has no NodeView bridge at all (only `@milkdown/components`, which is
   Vue-based) and no `@prosemirror-adapter` package exists in this
-  dependency tree. The title bar is a `contenteditable` element *outside*
-  `contentDOM` (so ProseMirror's mutation observer never tries to manage
-  it), synced to the node's `title` attr via `tr.setNodeAttribute` on
-  blur — a standard ProseMirror pattern for an externally-editable
-  non-content region.
+  dependency tree. The title bar is a real `<input type="text">`
+  (**not** a nested `contenteditable` div, see below), outside
+  `contentDOM` so ProseMirror's mutation observer never tries to manage
+  it, synced to the node's `title` attr via `tr.setNodeAttribute` on
+  `input`.
+
+**A second real bug, caught live (not by the headless test) — the title
+bar wasn't actually editable at all.** The first version used a nested
+`contenteditable="true"` div for the title, matching what looked like a
+standard ProseMirror pattern. Verified via a live Electron smoke test
+(driven through `playwright-core`'s `chromium.connectOverCDP()` against
+the CDP port `electron/main.ts` already opens on `9333` — the same
+proven approach this session's earlier `getUsableToken()` display-logic
+investigation used) that this design is fundamentally broken: a
+`contenteditable` region nested *inside* another `contenteditable`
+ancestor never receives real DOM focus in Chromium at all —
+`document.activeElement` stayed on the outer ProseMirror root the whole
+time, so neither `focus`/`blur`/`focusout` nor `input`/`keydown`/
+`beforeinput` ever fired on the nested div, even though typed text still
+visually appeared there (native contenteditable text insertion doesn't
+require the element to be "focused" in the DOM sense a form control
+needs). Net effect: typing a title looked like it worked, but nothing
+ever committed it back to the node's `title` attr, so it silently
+vanished the moment you switched to Source. Fixed by replacing the
+nested div with a real `<input type="text">` — a genuine independent
+form control gets real focus/blur/input events regardless of being
+nested inside a `contenteditable` ancestor, and comes with a free bonus:
+a native `placeholder` attribute for the capitalized-type fallback
+instead of a CSS `:empty::before` trick. For `details`, the `<input>`
+sits inside a real `<summary>` (moved there via `summary.appendChild`,
+inserted first) with `stopPropagation()` on the input's own click/
+mousedown so interacting with the title text doesn't also fire the
+`<summary>`'s native open/close toggle.
+
+Re-verified live after the fix, on real `ethos-manual-rework` content
+(a `!!! warning` block with no title, in System Setup → File Manager):
+typed "Startup Delay" into the title, switched to Source, and the
+serialized markdown read exactly `!!! warning "Startup Delay"` —
+confirming the full write path, not just the parse/serialize logic the
+headless test already covered.
 
 **A real round-trip bug caught before shipping**: `preprocessPymdownxBlocks()`
 used to bake a capitalized-type fallback title (e.g. `"Warning"`) directly

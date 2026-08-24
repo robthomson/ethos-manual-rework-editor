@@ -887,9 +887,9 @@
    NodeViews) — same values as .rendered-preview's own admonition/details
    rules above, just re-scoped to the editable surface, so a page looks
    the same whether you're viewing it in Preview or editing it in Rich.
-   .admonition-title is a separate nested contenteditable region (see
-   pymdownxViews.ts's own comment on why) — no [contenteditable] styling
-   needed here beyond the shared box rules below, which apply regardless. */
+   .admonition-title is a real <input> (see pymdownxViews.ts's own
+   comment on why, not a contenteditable div) — reset to blend into the
+   box rather than look like a normal form field. */
 .wysiwyg-scroll [contenteditable="true"] .admonition {
   border-left: 4px solid #448aff;
   background: #f4f8ff;
@@ -899,17 +899,20 @@
 }
 
 .wysiwyg-scroll [contenteditable="true"] .admonition-title {
-  font-weight: 700;
+  display: block;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0;
   margin: 0 0 0.3rem 0;
+  font: inherit;
+  font-weight: 700;
+  color: inherit;
   outline: none;
 }
 
-/* Shown only when the title bar is genuinely empty (no explicit title in
-   the source) — see pymdownxViews.ts's own comment on why the
-   capitalized-type default has to stay display-only, never real stored
-   text. */
-.wysiwyg-scroll [contenteditable="true"] .admonition-title:empty::before {
-  content: attr(data-placeholder);
+.wysiwyg-scroll [contenteditable="true"] .admonition-title::placeholder {
+  color: inherit;
   opacity: 0.5;
 }
 
@@ -937,7 +940,6 @@
 }
 
 .wysiwyg-scroll [contenteditable="true"] details summary {
-  font-weight: 700;
-  cursor: text;
+  cursor: pointer;
   outline: none;
 }
