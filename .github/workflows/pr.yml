@@ -58,6 +58,17 @@ jobs:
         shell: bash
         run: npm pkg set version="0.0.0-${{ env.GIT_VER }}"
 
+      # See release.yml's own comment for why this exists and why the
+      # secret is named GH_APP_CLIENT_ID rather than GITHUB_CLIENT_ID.
+      # Note: a PR from a fork doesn't get repo secrets at all, so this
+      # resolves to an empty GITHUB_CLIENT_ID there — the build still
+      # succeeds (predist's fallback in package.json handles a missing
+      # file the same way), sign-in in that artifact just won't work,
+      # same as before this change.
+      - name: Write backend/.env
+        shell: bash
+        run: echo "GITHUB_CLIENT_ID=${{ secrets.GH_APP_CLIENT_ID }}" > backend/.env
+
       # Builds natively for whatever OS/arch this runner already is — see
       # release.yml's own comment for why no --win/--mac/--linux or
       # --x64/--arm64 flags are needed.

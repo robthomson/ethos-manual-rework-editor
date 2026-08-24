@@ -59,6 +59,12 @@ jobs:
         shell: bash
         run: npm pkg set version="0.0.0-${{ env.GIT_VER }}"
 
+      # See release.yml's own comment for why this exists and why the
+      # secret is named GH_APP_CLIENT_ID rather than GITHUB_CLIENT_ID.
+      - name: Write backend/.env
+        shell: bash
+        run: echo "GITHUB_CLIENT_ID=${{ secrets.GH_APP_CLIENT_ID }}" > backend/.env
+
       # Builds natively for whatever OS/arch this runner already is — see
       # release.yml's own comment for why no --win/--mac/--linux or
       # --x64/--arm64 flags are needed.
