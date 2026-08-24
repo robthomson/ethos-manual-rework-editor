@@ -1,0 +1,54 @@
+name: Debug Windows Hang
+
+# Manual-only, throwaway diagnostic for the Windows electron-builder hang
+# (see release.yml's own comment history for the full investigation).
+# Isolates whether app-builder.exe (electron-builder's bundled native
+# helper binary, spawned as a child process to do its actual downloads)
+# hangs on its very first execution on a fresh CI machine — a fast,
+# cheap way to test that without waiting through a full ~25-minute
+# `npm run dist` cycle each time. Delete this file once the real hang is
+# understood and fixed.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: Probe app-builder.exe on a fresh Windows runner
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        shell: bash
+        run: npm install
+
+      - name: Locate app-builder.exe
+        shell: bash
+        run: find node_modules/app-builder-bin -iname "*.exe"
+
+      - name: Probe app-builder.exe --help (own short timeout)
+        shell: powershell
+        timeout-minutes: 2
+        run: |
+          $exe = "node_modules\app-builder-bin\win\x64\app-builder.exe"
+          Write-Host "Running: $exe --help"
+          & $exe --help
+          Write-Host "Exit code: $LASTEXITCODE"
+
+      - name: Probe app-builder.exe download-artifact for nsis (own short timeout)
+        shell: powershell
+        timeout-minutes: 5
+        run: |
+          $exe = "node_modules\app-builder-bin\win\x64\app-builder.exe"
+          $url = "https://github.com/electron-userland/electron-builder-binaries/releases/download/nsis-3.0.4.1/nsis-3.0.4.1.7z"
+          Write-Host "Running: $exe download-artifact --name nsis-3.0.4.1 --url $url"
+          & $exe download-artifact --name nsis-3.0.4.1 --url $url
+          Write-Host "Exit code: $LASTEXITCODE"
