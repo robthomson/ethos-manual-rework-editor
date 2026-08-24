@@ -46,13 +46,16 @@
     ],
     "win": { "target": "portable", "icon": "electron/icon.ico", "signAndEditExecutable": false },
     "portable": {
-      "artifactName": "${productName} ${version}-${arch}.${ext}"
+      "artifactName": "Ethos-Manual-Editor-${version}-${os}-${arch}.${ext}"
     },
-    "mac": { "target": "dmg" },
+    "mac": {
+      "target": "dmg",
+      "artifactName": "Ethos-Manual-Editor-${version}-${os}-${arch}.${ext}"
+    },
     "linux": {
       "target": ["AppImage", "tar.gz"],
       "icon": "electron/icon.png",
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+      "artifactName": "Ethos-Manual-Editor-${version}-${os}-${arch}.${ext}"
     }
   }
 }

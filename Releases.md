@@ -1,3 +1,12 @@
+## 0.2.2
+
+- Rich mode (the WYSIWYG editor) can now edit pages with admonitions
+  ("!!! note" boxes) and collapsible details sections directly, instead
+  of forcing those pages into raw-markdown Source mode.
+- Download asset names now always spell out the OS and CPU architecture
+  (e.g. `Ethos-Manual-Editor-0.2.2-mac-x64.dmg`), so it's clear at a
+  glance which file to grab.
+
 ## 0.2.1
 
 - Fixed GitHub sign-in not working at all in downloaded builds ("Couldn't

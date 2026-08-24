@@ -40,13 +40,15 @@ Binaries are published on GitHub Releases when a `release/*` tag is pushed:
 https://github.com/robthomson/ethos-manual-rework-editor/releases
 ```
 
-Asset names:
-- Windows: `Ethos Manual Editor <version>-x64.exe` (a portable exe — no
-  installer; just run it, no install/uninstall step)
-- macOS (Intel): `Ethos Manual Editor-<version>.dmg`
-- macOS (Apple Silicon): `Ethos Manual Editor-<version>-arm64.dmg`
-- Linux: `Ethos Manual Editor-<version>-<arch>.AppImage` and
-  `Ethos Manual Editor-<version>-<arch>.tar.gz` (`x64` or `arm64`)
+Every asset follows one pattern — `Ethos-Manual-Editor-<version>-<os>-<arch>.<ext>`
+— so OS and architecture are always explicit, never implied by the file
+extension alone:
+- Windows: `Ethos-Manual-Editor-<version>-win-x64.exe` (a portable exe —
+  no installer; just run it, no install/uninstall step)
+- macOS (Intel): `Ethos-Manual-Editor-<version>-mac-x64.dmg`
+- macOS (Apple Silicon): `Ethos-Manual-Editor-<version>-mac-arm64.dmg`
+- Linux: `Ethos-Manual-Editor-<version>-linux-<arch>.AppImage` and
+  `Ethos-Manual-Editor-<version>-linux-<arch>.tar.gz` (`x64` or `arm64`)
 
 None of these are code-signed yet, so Windows SmartScreen / macOS Gatekeeper
 will warn on first launch ("keep anyway" / "open anyway").
@@ -116,5 +118,5 @@ workflow runs; there's no separate manual packaging step to keep in sync.
   attach it by hand once the release exists:
   ```bash
   npm run dist                                             # on a Windows machine
-  gh release upload release/<version> "release/Ethos Manual Editor <version>-x64.exe"
+  gh release upload release/<version> "release/Ethos-Manual-Editor-<version>-win-x64.exe"
   ```
