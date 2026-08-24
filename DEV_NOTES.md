@@ -377,7 +377,27 @@ repo:**
   despite two "failed" mitigation attempts. Retrying a third Defender
   mitigation with the corrected path (`$env:RUNNER_TEMP`) plus explicit
   process exclusions for `app-builder.exe`/`7za.exe` alongside the
-  existing ones. **Not yet re-verified in CI.**
+  existing ones. **Re-verified via `push.yml` (no tag dance needed) —
+  hung again, at that exact same line**, with the exclusion step itself
+  confirmed to have run successfully beforehand. This conclusively rules
+  out Windows Defender: the one plausible gap in the exclusion path is
+  now closed, and the identical, deterministic hang persisted regardless.
+  Eight total CI cycles (six real build attempts + two isolated
+  diagnostic rounds) have now ruled out, with direct evidence: the
+  runner OS image (Server 2025 vs. 2022), both Windows packaging targets
+  (`nsis` and `portable`), Windows Defender (three different
+  configurations), and the Node-vs-PowerShell process-spawning
+  mechanism (every component — `app-builder.exe`, `7za.exe`, and even
+  electron-builder's *exact* internal Node call — completes in under a
+  second in isolation). The hang is real, reproducible, and specific to
+  the full `npm run dist` pipeline on GitHub-hosted Windows runners, but
+  the root cause remains unknown — properly diagnosing it further would
+  need an interactive session on the actual hanging runner (e.g. a
+  `tmate`/SSH debug step), which needs the user's live participation
+  mid-run rather than another unattended guess. Paused here pending that
+  decision; `debug-windows.yml` and `debug-node-spawn.js` (throwaway
+  diagnostic-only files, `workflow_dispatch`-triggered, never on the
+  real build path) are left in place for whenever this resumes.
 - **Image handling**: relative image `src`s resolve to real
   raw.githubusercontent.com URLs, replicating `mkdocs.yml`'s actual
   `i18n: fallback_to_default: true` config — a locale-specific screenshot
