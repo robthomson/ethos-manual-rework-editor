@@ -9,7 +9,6 @@ jobs:
   build-app:
     name: Build Push (${{ matrix.os_name }}-${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
-    # See release.yml's own comment for why Windows isn't in this matrix.
     timeout-minutes: 25
     strategy:
       fail-fast: false
@@ -27,6 +26,9 @@ jobs:
           - runner: ubuntu-24.04-arm
             os_name: linux
             arch: arm64
+          - runner: windows-2022
+            os_name: win
+            arch: x64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,18 +45,25 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+            frontend/package-lock.json
 
+      # npm ci (not npm install) — faster (no dependency resolution,
+      # just installs exactly what's locked) and never rewrites the
+      # lockfile, which matters for the npm pkg set step right below.
       - name: Install dependencies
         shell: bash
         run: |
-          npm install
-          npm --prefix backend install
-          npm --prefix frontend install
+          npm ci
+          npm --prefix backend ci
+          npm --prefix frontend ci
 
       # npm pkg set (not `npm version`, which refuses to run unless the
-      # git working directory is clean — something `npm install` above
-      # could easily violate via lockfile drift) just edits the field
-      # directly, which is all this needs.
+      # git working directory is clean) just edits the field directly,
+      # which is all this needs.
       - name: Set package version (commit-based)
         shell: bash
         run: npm pkg set version="0.0.0-${{ env.GIT_VER }}"
@@ -92,4 +101,12 @@ jobs:
           path: |
             release/*.AppImage
             release/*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload app artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ethos-manual-editor-${{ env.GIT_VER }}-${{ env.OS_NAME }}-${{ env.ARCH_NAME }}
+          path: release/*.exe
           if-no-files-found: error

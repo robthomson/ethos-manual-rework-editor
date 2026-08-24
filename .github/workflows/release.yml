@@ -12,22 +12,22 @@ jobs:
   build-app:
     name: Build app (${{ matrix.os_name }}-${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
-    # Windows is deliberately NOT in this matrix. `npm run dist` on
-    # GitHub-hosted Windows runners reproducibly hangs inside
-    # electron-builder's packaging step, always at the identical point
-    # (right after downloading its bundled NSIS tool), regardless of the
-    # runner OS image (Server 2025 vs. 2022), the Windows target (`nsis`
-    # vs. `portable`), or Windows Defender configuration (three different
-    # exclusion setups tried, including one that turned out to target the
-    # wrong temp directory and one that correctly targeted the right one)
-    # — eight separate CI cycles ruled all of that out with direct
-    # evidence, including isolated diagnostics proving every individual
-    # component (electron-builder's native helper binary, its bundled 7z
-    # tool, even the exact Node.js call electron-builder itself makes)
-    # completes in under a second on its own. See DEV_NOTES.md for the
-    # full investigation. The Windows portable exe is built locally
-    # instead (reliable — proven repeatedly this session) and uploaded to
-    # the release manually; see README.md's release process.
+    # Windows was excluded from this matrix for a long stretch — `npm run
+    # dist` on GitHub-hosted Windows runners reproducibly hung inside
+    # electron-builder's packaging step. Nine investigation cycles (see
+    # DEV_NOTES.md's full "Windows CI hang" writeup) eventually found it
+    # via a live interactive tmate session: it was never a deadlock —
+    # electron-builder's packaging step was genuinely, slowly compressing
+    # backend/node_modules, 95% of whose ~2000 files were devDependency
+    # tooling (typescript, ts-node-dev and its own substantial transitive
+    # tree) never needed at runtime, at maximum LZMA compression on a
+    # shared runner's storage. scripts/prepare-backend-prod-modules.js
+    # (a real `npm ci --omit=dev` into a separate backend/node_modules.prod/)
+    # cut that file count by over half and took the whole packaging step
+    # from 40+ minutes (still running when a timed unattended test was
+    # cancelled) / historically as long as 1h24m, down to about 90
+    # seconds — verified directly on a real Windows CI runner before
+    # re-adding it here.
     timeout-minutes: 25
     strategy:
       fail-fast: false
@@ -45,6 +45,9 @@ jobs:
           - runner: ubuntu-24.04-arm
             os_name: linux
             arch: arm64
+          - runner: windows-2022
+            os_name: win
+            arch: x64
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -69,19 +72,26 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+            frontend/package-lock.json
 
+      # npm ci (not npm install) — faster (no dependency resolution,
+      # just installs exactly what's locked) and never rewrites the
+      # lockfile, which matters for the npm pkg set step right below.
       - name: Install dependencies
         shell: bash
         run: |
-          npm install
-          npm --prefix backend install
-          npm --prefix frontend install
+          npm ci
+          npm --prefix backend ci
+          npm --prefix frontend ci
 
       # electron-builder reads productName/version straight out of
       # package.json for artifact naming. npm pkg set (not `npm version`,
-      # which refuses to run unless the git working directory is clean —
-      # something `npm install` above could easily violate via lockfile
-      # drift) just edits the field directly, which is all this needs.
+      # which refuses to run unless the git working directory is clean)
+      # just edits the field directly, which is all this needs.
       - name: Set package version from tag
         shell: bash
         run: npm pkg set version="${{ env.GIT_VER }}"
@@ -139,6 +149,14 @@ jobs:
             release/*.tar.gz
           if-no-files-found: error
 
+      - name: Upload app artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ethos-manual-editor-${{ env.GIT_VER }}-${{ env.OS_NAME }}-${{ env.ARCH_NAME }}
+          path: release/*.exe
+          if-no-files-found: error
+
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
@@ -175,10 +193,11 @@ jobs:
           python3 .github/scripts/extract-release-notes.py "${{ env.GIT_VER }}" Releases.md > Notes.md
           sed -n '1,200p' Notes.md
 
-      # Windows isn't built here (see build-app job's own comment) — this
-      # creates the release with the mac/Linux assets only. The Windows
-      # portable exe is built locally and added afterward with:
-      #   gh release upload <tag> "Ethos-Manual-Editor-<version>-win-x64.exe"
+      # Windows is built by build-app now too (see that job's own
+      # comment for the fix that made this possible) — its artifact
+      # downloads into ./dist alongside mac/Linux via the same
+      # download-artifact step above, so the glob below already picks it
+      # up. No separate manual upload step needed anymore.
       - name: Create Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
