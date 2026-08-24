@@ -12,28 +12,27 @@ jobs:
   build-app:
     name: Build app (${{ matrix.os_name }}-${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
-    # Caught live: `windows-latest` (which had just moved to a brand-new
-    # Windows Server 2025 image, `win25/...`) reproducibly hung the
-    # electron-builder step every single time, always stopping at the
-    # exact same point — right after downloading electron-builder's
-    # bundled `nsis-3.0.4.1.7z` packaging tool, before any extraction
-    # output. Two rounds of Windows-Defender mitigations (disabling
-    # real-time scanning, then path/process exclusions) made zero
-    # difference and it hung at that identical byte-for-byte spot both
-    # times — ruling out AV interference and pointing at the runner
-    # image itself being incompatible with that bundled tool. Pinned to
-    # `windows-2022` (a known-stable prior image) instead of chasing the
-    # new image further. Kept the timeout as a safety net regardless —
-    # if a hang like this ever recurs, this fails fast instead of
-    # silently burning hours.
+    # Windows is deliberately NOT in this matrix. `npm run dist` on
+    # GitHub-hosted Windows runners reproducibly hangs inside
+    # electron-builder's packaging step, always at the identical point
+    # (right after downloading its bundled NSIS tool), regardless of the
+    # runner OS image (Server 2025 vs. 2022), the Windows target (`nsis`
+    # vs. `portable`), or Windows Defender configuration (three different
+    # exclusion setups tried, including one that turned out to target the
+    # wrong temp directory and one that correctly targeted the right one)
+    # — eight separate CI cycles ruled all of that out with direct
+    # evidence, including isolated diagnostics proving every individual
+    # component (electron-builder's native helper binary, its bundled 7z
+    # tool, even the exact Node.js call electron-builder itself makes)
+    # completes in under a second on its own. See DEV_NOTES.md for the
+    # full investigation. The Windows portable exe is built locally
+    # instead (reliable — proven repeatedly this session) and uploaded to
+    # the release manually; see README.md's release process.
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: windows-2022
-            os_name: windows
-            arch: x64
           - runner: macos-15-intel
             os_name: macos
             arch: x64
@@ -87,29 +86,6 @@ jobs:
         shell: bash
         run: npm pkg set version="${{ env.GIT_VER }}"
 
-      # Extensive isolated diagnostics (see DEV_NOTES.md) ruled out the
-      # runner image, the NSIS/portable target choice, and Node's own
-      # child-process spawning of electron-builder's helper binary — every
-      # single component reproduces instantly on its own; only the real,
-      # full `npm run dist` build hangs, always at the same point. The one
-      # earlier Defender-exclusion attempt excluded the wrong temp
-      # directory: GitHub's Windows runners redirect TEMP to `RUNNER_TEMP`
-      # (`D:\a\_temp`), not `%LOCALAPPDATA%\Temp`, which is what got
-      # excluded — so that mitigation was never actually tested correctly.
-      # Retrying with the corrected path.
-      - name: Exclude build paths from Windows Defender scanning
-        if: runner.os == 'Windows'
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath "${{ github.workspace }}"
-          Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\electron-builder\Cache"
-          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
-          Add-MpPreference -ExclusionProcess "electron-builder.exe"
-          Add-MpPreference -ExclusionProcess "app-builder.exe"
-          Add-MpPreference -ExclusionProcess "7za.exe"
-          Add-MpPreference -ExclusionProcess "makensis.exe"
-          Add-MpPreference -ExclusionProcess "signtool.exe"
-
       # Builds natively for whatever OS/arch this runner already is — no
       # explicit --win/--mac/--linux or --x64/--arm64 flags needed, since
       # each matrix entry's host already matches the target (matching how
@@ -125,14 +101,6 @@ jobs:
       - name: List build output
         shell: bash
         run: ls -la release
-
-      - name: Upload app artifact (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ethos-manual-editor-${{ env.GIT_VER }}-${{ env.OS_NAME }}-${{ env.ARCH_NAME }}
-          path: release/*.exe
-          if-no-files-found: error
 
       - name: Upload app artifact (macOS)
         if: runner.os == 'macOS'
@@ -188,6 +156,10 @@ jobs:
           python3 .github/scripts/extract-release-notes.py "${{ env.GIT_VER }}" Releases.md > Notes.md
           sed -n '1,200p' Notes.md
 
+      # Windows isn't built here (see build-app job's own comment) — this
+      # creates the release with the mac/Linux assets only. The Windows
+      # portable exe is built locally and added afterward with:
+      #   gh release upload <tag> "Ethos Manual Editor <version>-x64.exe"
       - name: Create Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

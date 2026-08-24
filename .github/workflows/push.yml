@@ -9,18 +9,12 @@ jobs:
   build-app:
     name: Build Push (${{ matrix.os_name }}-${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
-    # See release.yml's own comment — a Windows leg once hung on the
-    # electron-builder step for 1h24m (a stuck runner/download, not this
-    # config; the same command succeeded locally in ~8 minutes) with no
-    # per-step timeout to catch it.
+    # See release.yml's own comment for why Windows isn't in this matrix.
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: windows-2022
-            os_name: windows
-            arch: x64
           - runner: macos-15-intel
             os_name: macos
             arch: x64
@@ -65,23 +59,6 @@ jobs:
         shell: bash
         run: npm pkg set version="0.0.0-${{ env.GIT_VER }}"
 
-      # See release.yml's own comment: the earlier Defender-exclusion
-      # attempt excluded the wrong temp directory (GH Windows runners
-      # redirect TEMP to RUNNER_TEMP, i.e. D:\a\_temp) — retrying with the
-      # corrected path.
-      - name: Exclude build paths from Windows Defender scanning
-        if: runner.os == 'Windows'
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath "${{ github.workspace }}"
-          Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\electron-builder\Cache"
-          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
-          Add-MpPreference -ExclusionProcess "electron-builder.exe"
-          Add-MpPreference -ExclusionProcess "app-builder.exe"
-          Add-MpPreference -ExclusionProcess "7za.exe"
-          Add-MpPreference -ExclusionProcess "makensis.exe"
-          Add-MpPreference -ExclusionProcess "signtool.exe"
-
       # Builds natively for whatever OS/arch this runner already is — see
       # release.yml's own comment for why no --win/--mac/--linux or
       # --x64/--arm64 flags are needed.
@@ -92,14 +69,6 @@ jobs:
       - name: List build output
         shell: bash
         run: ls -la release
-
-      - name: Upload app artifact (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ethos-manual-editor-${{ env.GIT_VER }}-${{ env.OS_NAME }}-${{ env.ARCH_NAME }}
-          path: release/*.exe
-          if-no-files-found: error
 
       - name: Upload app artifact (macOS)
         if: runner.os == 'macOS'

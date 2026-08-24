@@ -394,10 +394,18 @@ repo:**
   the root cause remains unknown — properly diagnosing it further would
   need an interactive session on the actual hanging runner (e.g. a
   `tmate`/SSH debug step), which needs the user's live participation
-  mid-run rather than another unattended guess. Paused here pending that
-  decision; `debug-windows.yml` and `debug-node-spawn.js` (throwaway
-  diagnostic-only files, `workflow_dispatch`-triggered, never on the
-  real build path) are left in place for whenever this resumes.
+  mid-run rather than another unattended guess. Asked directly rather
+  than spend a 9th cycle guessing; **decision: stop chasing this in
+  CI.** Removed Windows from all three workflows' matrices entirely
+  (macOS/Linux stay fully automated) and deleted the throwaway
+  `debug-windows.yml`/`debug-node-spawn.js` diagnostic files. The
+  Windows portable exe (`package.json`'s `win`/`portable` config is
+  untouched and still correct — this only ever failed in CI, never
+  locally, across every attempt this session) is now built locally per
+  release and uploaded by hand via `gh release upload` — documented in
+  `README.md`'s Releasing section. Revisit if GitHub's Windows runner
+  images change, or if this is worth a proper `tmate` debugging session
+  later.
 - **Image handling**: relative image `src`s resolve to real
   raw.githubusercontent.com URLs, replicating `mkdocs.yml`'s actual
   `i18n: fallback_to_default: true` config — a locale-specific screenshot
