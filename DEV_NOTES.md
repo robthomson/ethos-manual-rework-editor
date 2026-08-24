@@ -488,6 +488,20 @@ repo:**
     deleted. `README.md`'s "Windows isn't built by CI" section and the
     manual `gh release upload` step removed accordingly; the fully
     automated release flow now covers Windows/macOS/Linux uniformly.
+    **One more real factor, caught on this same PR's own first live
+    run**: those three workflows had always used `npm install` (not
+    `npm ci`) for all three lockfiles — that PR's Windows job still took
+    21+ minutes on the identical packaging step the debug workflow had
+    just clocked at ~90 seconds. Switched all three workflows to
+    `npm ci` (also adding `setup-node`'s own npm cache) and re-ran on
+    the same PR: **2m27s**, matching the debug workflow's number
+    closely, while the still-running `npm install` version was cancelled
+    past 21 minutes for comparison. `npm ci`'s lack of dependency
+    resolution (it installs exactly what's locked, no version-range
+    solving) turned out to matter as much as the file-count fix itself
+    on a shared runner's storage — not just "faster/more reproducible"
+    as generic advice, a real, measured contributor to this specific
+    problem.
 - **Image handling**: relative image `src`s resolve to real
   raw.githubusercontent.com URLs, replicating `mkdocs.yml`'s actual
   `i18n: fallback_to_default: true` config — a locale-specific screenshot
