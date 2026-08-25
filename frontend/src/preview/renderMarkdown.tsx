@@ -5,11 +5,12 @@
  *   strip attr_list noise, retag pymdownx admonitions/details/tabs
  *   (see pymdownxBlocks.ts), convert to hast, add heading anchors
  *   (mkdocs.yml's `toc: permalink: true`), rewrite relative image
- *   `src`s to real GitHub raw URLs, and render straight to React
- *   elements (rehype-react) rather than building an HTML string and
- *   dangerously-setting it — keeps the door open for later
- *   interactivity (e.g. click an image to replace it) without a second
- *   DOM-walking pass.
+ *   `src`s to real GitHub raw URLs, mark every link to open externally
+ *   (see rehypeExternalLinks's own comment for why that's needed at
+ *   all), and render straight to React elements (rehype-react) rather
+ *   than building an HTML string and dangerously-setting it — keeps the
+ *   door open for later interactivity (e.g. click an image to replace
+ *   it) without a second DOM-walking pass.
  *
  * Info:
  *   Only the extensions actually listed in ethos-manual-rework's own
@@ -82,6 +83,28 @@ function rehypeRewriteImages(ctx: ImageResolutionContext) {
   };
 }
 
+// A plain <a href> with no target, clicked inside this Electron app,
+// navigates the *whole app window* to that URL rather than opening a new
+// tab the way it would in a real browser — there's no separate handler
+// for ordinary top-level navigation, only for target="_blank"/window.open
+// (see electron/main.ts's setWindowOpenHandler, already relied on by
+// every other external link in the app — PR links, the sign-in
+// verification link, the GitHub App install link, all authored with
+// target="_blank" for exactly this reason). Markdown-authored links
+// (`[text](url)`) had no way to opt into that until now — this routes
+// every rendered link through the same, already-proven path instead of
+// inventing a new confirmation-dialog pattern that nothing else in the
+// app uses.
+function rehypeExternalLinks() {
+  return () => (tree: any) => {
+    visit(tree, "element", (node: any) => {
+      if (node.tagName !== "a" || !node.properties?.href) return;
+      node.properties.target = "_blank";
+      node.properties.rel = ["noopener", "noreferrer"];
+    });
+  };
+}
+
 export interface RenderMarkdownOptions extends ImageResolutionContext {}
 
 export function renderMarkdown(content: string, ctx: RenderMarkdownOptions): React.ReactNode {
@@ -95,6 +118,7 @@ export function renderMarkdown(content: string, ctx: RenderMarkdownOptions): Rea
     .use(remarkRehype)
     .use(rehypeSlug)
     .use(rehypeRewriteImages(ctx))
+    .use(rehypeExternalLinks())
     .use(rehypeReact, {
       Fragment: jsxRuntime.Fragment,
       jsx: jsxRuntime.jsx,

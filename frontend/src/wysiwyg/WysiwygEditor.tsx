@@ -100,6 +100,7 @@ import { Editor, rootCtx, defaultValueCtx, remarkStringifyOptionsCtx } from "@mi
 import { commonmark } from "@milkdown/kit/preset/commonmark";
 import {
   imageSchema,
+  linkAttr,
   toggleStrongCommand,
   toggleEmphasisCommand,
   toggleLinkCommand,
@@ -189,6 +190,17 @@ function EditorInner({ content, onChange, imageCtx, handleRef }: EditorInnerProp
         ctx.set(rootCtx, root);
         ctx.set(defaultValueCtx, initialText);
         ctx.update(admonitionRemark.options.key, () => initialMarkers);
+        // A plain <a href> clicked inside this Electron app navigates the
+        // *whole app window* away rather than opening a new tab — see
+        // preview/renderMarkdown.tsx:rehypeExternalLinks's own comment
+        // for the full reasoning (same fix, same reason, applied here to
+        // Rich mode's Milkdown-rendered links instead of Preview's
+        // rehype-rendered ones). linkAttr is the built-in Milkdown ctx
+        // slice preset-commonmark's own link toDOM merges in before
+        // mark.attrs (`href`/`title`), confirmed by reading that
+        // package's real source — the intended, public customization
+        // point for exactly this, no toDOM override needed.
+        ctx.set(linkAttr.key, () => ({ target: "_blank", rel: "noopener noreferrer" }));
         // remark-stringify's own default is "*" — caught live in a real
         // submitted PR: a one-word edit inside a bullet list produced an
         // 8-line diff, every existing "-" bullet rewritten to "*" for no
