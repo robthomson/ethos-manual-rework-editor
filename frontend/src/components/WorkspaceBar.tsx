@@ -44,9 +44,15 @@
  *   means something different once a PR's already open ("update it")
  *   versus none yet ("create one") — submitPullRequest() on the backend
  *   already handles that distinction itself; this is just reflecting it.
+ *
+ *   Clicking the button doesn't submit immediately — it opens
+ *   ReviewChangesModal first, a real line-level diff of every pending
+ *   change, and only actually calls handleSubmit() once that's
+ *   confirmed. See that file's own header comment for why.
  */
 import { useEffect, useState, type MouseEvent } from "react";
 import type { ChangeEntry, PrStatus, SubmitResult, WorkspaceMeta } from "../hooks/useWorkspace";
+import { ReviewChangesModal } from "./ReviewChangesModal";
 
 interface WorkspaceBarProps {
   workspaces: WorkspaceMeta[];
@@ -91,6 +97,7 @@ export function WorkspaceBar({
   const [creating, setCreating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<SubmitResult | null>(null);
+  const [showReview, setShowReview] = useState(false);
 
   // Keeps the preselected locale in sync with whatever's currently
   // browsed if the form is opened fresh under a different one — but
@@ -132,6 +139,18 @@ export function WorkspaceBar({
     const result = await onSubmit(active.name);
     setSubmitting(false);
     setSubmitResult(result);
+  }
+
+  // "Submit for review" no longer commits/opens the PR directly — it
+  // opens ReviewChangesModal's real diff first (a real GitHub commit +
+  // PR is exactly the kind of hard-to-reverse, outward-facing action
+  // that deserves a look at what's actually changing before it happens,
+  // same reasoning as ExternalLinkModal's own confirmation step
+  // elsewhere in this app). Confirming there calls back into this same
+  // handleSubmit() — one submit code path, not two.
+  function handleConfirmFromReview() {
+    setShowReview(false);
+    handleSubmit();
   }
 
   return (
@@ -235,7 +254,7 @@ export function WorkspaceBar({
                     ? "Nothing to submit yet."
                     : undefined
               }
-              onClick={handleSubmit}
+              onClick={() => setShowReview(true)}
             >
               {submitting
                 ? "Submitting…"
@@ -260,6 +279,14 @@ export function WorkspaceBar({
             )}
           </div>
         </div>
+      )}
+
+      {showReview && active && (
+        <ReviewChangesModal
+          workspaceName={active.name}
+          onConfirm={handleConfirmFromReview}
+          onCancel={() => setShowReview(false)}
+        />
       )}
     </div>
   );
