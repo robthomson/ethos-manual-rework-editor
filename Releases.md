@@ -1,3 +1,11 @@
+## 0.2.5
+
+- Compatibility update: the docs site's page navigation is now defined
+  in `docs/en/SUMMARY.md` instead of `mkdocs.yml` (no visible change —
+  browsing, search, and creating new pages/sections all work exactly as
+  before; new pages now add a single clean line to that file instead of
+  rewriting the whole `mkdocs.yml` config).
+
 ## 0.2.4
 
 - Added search: find any page by its actual content, not just its
