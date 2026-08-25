@@ -850,6 +850,82 @@
   width: 100%;
 }
 
+.review-modal-box {
+  width: 720px;
+  max-width: 92vw;
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+}
+
+.review-diff-list {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin: 0.5rem 0;
+}
+
+.review-diff-file {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.review-diff-file-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: #f6f8fa;
+  border-bottom: 1px solid #ddd;
+}
+
+.review-diff-path {
+  font-family: monospace;
+  font-size: 0.85rem;
+}
+
+.review-diff-image-note {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.review-diff-body {
+  margin: 0;
+  padding: 0.4rem 0;
+  overflow-x: auto;
+  font-family: monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.diff-line {
+  white-space: pre;
+  padding: 0 0.6rem;
+}
+
+.diff-add {
+  background: #e6ffed;
+  color: #24292e;
+}
+
+.diff-remove {
+  background: #ffeef0;
+  color: #24292e;
+}
+
+.diff-gap {
+  color: #999;
+  font-style: italic;
+  background: #fafbfc;
+  white-space: normal;
+}
+
 .add-image-dropzone {
   border: 2px dashed #ccc;
   border-radius: 6px;

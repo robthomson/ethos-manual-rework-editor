@@ -611,6 +611,56 @@ export async function scanChanges(name: string): Promise<ChangeEntry[]> {
   return changes;
 }
 
+export interface ChangeDiff {
+  path: string;
+  type: "added" | "modified";
+  // Images have no baseline/text-diff concept at all (see uploadImage()'s
+  // own comment) — the frontend shows these as a plain "image added"
+  // entry instead of attempting a text diff.
+  isImage: boolean;
+  // null baseline means "added" (nothing to diff against — the whole
+  // working content is new). Never null for "modified".
+  baseline: string | null;
+  working: string | null; // null only for an image
+}
+
+// The content half of scanChanges() above — same walk, same baseline
+// paths, but reading the actual before/after text instead of just
+// noting that it differs. Kept separate rather than folded into
+// scanChanges() itself: every other caller of scanChanges() (the
+// sidebar's own Changes list, discardChange()) only ever needed the
+// list, not the content, and reading every changed file's full text on
+// every one of those calls would be wasted I/O they don't need.
+export async function getChangeDiffs(name: string): Promise<ChangeDiff[]> {
+  const changes = await scanChanges(name);
+  const meta = await readMeta(name);
+  const root = workspaceRoot(name);
+  const docsRoot = path.join(root, docsPath(meta.locale, ""));
+
+  const diffs: ChangeDiff[] = [];
+  for (const change of changes) {
+    if (IMAGE_EXTENSIONS.test(change.path)) {
+      diffs.push({ path: change.path, type: change.type, isImage: true, baseline: null, working: null });
+      continue;
+    }
+
+    if (change.path === "mkdocs.yml") {
+      const working = await fs.readFile(mkdocsWorkingPath(root), "utf8");
+      const baselineFile = mkdocsBaselinePath(root);
+      const baseline = (await fs.pathExists(baselineFile)) ? await fs.readFile(baselineFile, "utf8") : null;
+      diffs.push({ path: change.path, type: change.type, isImage: false, baseline, working });
+      continue;
+    }
+
+    const working = await fs.readFile(path.join(docsRoot, change.path), "utf8");
+    const baselineFile = baselinePath(root, meta.locale, change.path);
+    const baseline = (await fs.pathExists(baselineFile)) ? await fs.readFile(baselineFile, "utf8") : null;
+    diffs.push({ path: change.path, type: change.type, isImage: false, baseline, working });
+  }
+
+  return diffs;
+}
+
 // Removes mdPath's own nav entry from the workspace's local mkdocs.yml —
 // the reverse of createNewPage()/createNewSection()'s own insertion.
 // Only ever called for a path that genuinely has no baseline (a page or

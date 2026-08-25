@@ -30,6 +30,7 @@ import {
   ensurePageMaterialized,
   savePage,
   scanChanges,
+  getChangeDiffs,
   discardChange,
   createNewPage,
   createNewSection,
@@ -216,6 +217,19 @@ router.get("/:name/images/:filename", async (req, res) => {
 router.get("/:name/changes", async (req, res) => {
   try {
     res.json({ changes: await scanChanges(req.params.name) });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// The content behind each change — what "Submit for review" shows for
+// confirmation before it actually commits/opens a PR (WorkspaceBar.tsx's
+// review modal). Same change list as /changes above, plus each entry's
+// actual before/after text so the frontend can render a real diff
+// instead of just a bare list of paths.
+router.get("/:name/diff", async (req, res) => {
+  try {
+    res.json({ diffs: await getChangeDiffs(req.params.name) });
   } catch (err) {
     handleError(res, err);
   }
