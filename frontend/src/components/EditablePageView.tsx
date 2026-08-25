@@ -70,9 +70,11 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { MarkdownPreview } from "../preview/renderMarkdown";
 import { AddImageModal } from "./AddImageModal";
+import { ExternalLinkModal } from "./ExternalLinkModal";
 import { relativeAssetPath } from "../utils/relativePath";
 import { containsPymdownxBlocks } from "../preview/pymdownxBlocks";
 import { classifyMarkdownLink } from "../preview/linkResolver";
+import { useExternalLinkGuard } from "../hooks/useExternalLinkGuard";
 import { WysiwygEditor, type WysiwygEditorHandle } from "../wysiwyg/WysiwygEditor";
 
 interface EditablePageData {
@@ -184,6 +186,7 @@ export function EditablePageView({
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkValue, setLinkValue] = useState("");
   const [discarding, setDiscarding] = useState(false);
+  const externalLinkGuard = useExternalLinkGuard();
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Guards against saving stale content from a page that's since been
@@ -324,9 +327,13 @@ export function EditablePageView({
     const href = anchor.getAttribute("href");
     if (!href) return;
     const classification = classifyMarkdownLink(href, mdPath);
-    if (classification.kind !== "internal") return;
-    e.preventDefault();
-    onNavigate(classification.mdPath);
+    if (classification.kind === "internal") {
+      e.preventDefault();
+      onNavigate(classification.mdPath);
+    } else if (classification.kind === "external") {
+      e.preventDefault();
+      externalLinkGuard.requestOpen(href);
+    }
   }
 
   async function openImageModal() {
@@ -409,6 +416,7 @@ export function EditablePageView({
                 locale="en"
                 mdPath={mdPath}
                 onNavigate={onNavigate}
+                onExternalLink={externalLinkGuard.requestOpen}
               />
             </div>
           )}
@@ -504,6 +512,7 @@ export function EditablePageView({
                 mdPath={mdPath}
                 workspace={workspace}
                 onNavigate={onNavigate}
+                onExternalLink={externalLinkGuard.requestOpen}
               />
             </div>
           )}
@@ -516,6 +525,14 @@ export function EditablePageView({
           existingNames={existingImageNames}
           onClose={() => setShowImageModal(false)}
           onUploaded={handleImageUploaded}
+        />
+      )}
+
+      {externalLinkGuard.pendingUrl && (
+        <ExternalLinkModal
+          url={externalLinkGuard.pendingUrl}
+          onConfirm={externalLinkGuard.confirm}
+          onCancel={externalLinkGuard.cancel}
         />
       )}
     </div>

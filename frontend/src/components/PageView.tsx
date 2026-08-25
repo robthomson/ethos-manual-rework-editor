@@ -15,6 +15,8 @@
  */
 import { useEffect, useState } from "react";
 import { MarkdownPreview } from "../preview/renderMarkdown";
+import { ExternalLinkModal } from "./ExternalLinkModal";
+import { useExternalLinkGuard } from "../hooks/useExternalLinkGuard";
 
 interface PageData {
   source: string;
@@ -56,6 +58,7 @@ export function PageView({ branch, locale, localeName, mdPath, title, onNavigate
   const [loading, setLoading] = useState(true);
   const [englishMode, setEnglishMode] = useState<PaneMode>("source");
   const [translationMode, setTranslationMode] = useState<PaneMode>("source");
+  const externalLinkGuard = useExternalLinkGuard();
 
   useEffect(() => {
     let cancelled = false;
@@ -122,6 +125,7 @@ export function PageView({ branch, locale, localeName, mdPath, title, onNavigate
                 locale="en"
                 mdPath={mdPath}
                 onNavigate={onNavigate}
+                onExternalLink={externalLinkGuard.requestOpen}
               />
             </div>
           )}
@@ -143,12 +147,21 @@ export function PageView({ branch, locale, localeName, mdPath, title, onNavigate
                   locale={locale}
                   mdPath={mdPath}
                   onNavigate={onNavigate}
+                  onExternalLink={externalLinkGuard.requestOpen}
                 />
               </div>
             )}
           </div>
         )}
       </div>
+
+      {externalLinkGuard.pendingUrl && (
+        <ExternalLinkModal
+          url={externalLinkGuard.pendingUrl}
+          onConfirm={externalLinkGuard.confirm}
+          onCancel={externalLinkGuard.cancel}
+        />
+      )}
     </div>
   );
 }

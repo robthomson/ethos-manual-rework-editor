@@ -150,6 +150,13 @@ interface MarkdownPreviewProps {
   // would. Optional only so a caller that genuinely has nowhere to
   // navigate to could omit it — every real caller today provides it.
   onNavigate?: (mdPath: string) => void;
+  // Called instead of following a link when it's genuinely external
+  // (leaves this docs repo entirely) — every caller passes
+  // useExternalLinkGuard()'s requestOpen, which shows a confirmation
+  // before actually opening it in the system browser. A same-page
+  // anchor (#foo) gets neither callback — left to the browser's own
+  // default in-page-scroll behavior.
+  onExternalLink?: (url: string) => void;
 }
 
 // Debounced to a short pause in typing rather than every keystroke —
@@ -158,27 +165,37 @@ interface MarkdownPreviewProps {
 // shorter than that file's 3000ms without janking the UI.
 const RENDER_DEBOUNCE_MS = 300;
 
-export function MarkdownPreview({ content, branch, locale, mdPath, workspace, onNavigate }: MarkdownPreviewProps) {
+export function MarkdownPreview({
+  content,
+  branch,
+  locale,
+  mdPath,
+  workspace,
+  onNavigate,
+  onExternalLink,
+}: MarkdownPreviewProps) {
   const [node, setNode] = useState<React.ReactNode>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Single delegated handler rather than per-link ones — the rendered
   // tree is plain React elements from rehype-react, not components of
   // our own, so there's nowhere natural to attach a per-anchor onClick
-  // without a second pass over the tree. Only intercepts internal
-  // cross-references (see linkResolver.ts); a genuine external link
-  // (already marked target="_blank" by rehypeExternalLinks) is left
-  // alone entirely — default behavior + Electron's own
-  // setWindowOpenHandler already do the right thing for those.
+  // without a second pass over the tree. A same-page anchor (#foo) gets
+  // neither callback and is left alone entirely — the browser's own
+  // default in-page-scroll behavior already does the right thing there.
   function handleClick(e: React.MouseEvent<HTMLDivElement>) {
     const anchor = (e.target as HTMLElement).closest("a");
     if (!anchor) return;
     const href = anchor.getAttribute("href");
     if (!href) return;
     const classification = classifyMarkdownLink(href, mdPath);
-    if (classification.kind !== "internal" || !onNavigate) return;
-    e.preventDefault();
-    onNavigate(classification.mdPath);
+    if (classification.kind === "internal" && onNavigate) {
+      e.preventDefault();
+      onNavigate(classification.mdPath);
+    } else if (classification.kind === "external" && onExternalLink) {
+      e.preventDefault();
+      onExternalLink(href);
+    }
   }
 
   useEffect(() => {
