@@ -42,20 +42,35 @@ export function useNav() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch("/api/nav/branches")
-      .then((res) => res.json())
-      .then((data: { branches?: string[]; error?: string }) => {
-        if (data.error) {
-          setError(data.error);
-          return;
-        }
-        const list = data.branches || [];
-        setBranches(list);
-        if (list.length && !list.includes("main")) setBranch(list[0]);
-      })
-      .catch(() => setError("Couldn't reach the backend."));
+  // Wrapped the same way loadToc() below is — App.tsx calls this again
+  // once sign-in completes (see refreshOnSignIn below), since a call
+  // that failed while still signed out (most commonly GitHub's own
+  // anonymous rate limit — 60/hour, easy to exhaust on a repo this
+  // size) has no other way to ever retry: this effect only fires once,
+  // on mount, and there was previously nothing that re-ran it after
+  // auth state changed. Confirmed live: sign in after the anonymous
+  // branches/toc fetch already failed, and the sidebar was stuck
+  // showing that stale rate-limit error indefinitely despite now being
+  // signed in with a much higher quota that would have succeeded.
+  const loadBranches = useCallback(async () => {
+    try {
+      const res = await fetch("/api/nav/branches");
+      const data: { branches?: string[]; error?: string } = await res.json();
+      if (data.error) {
+        setError(data.error);
+        return;
+      }
+      const list = data.branches || [];
+      setBranches(list);
+      if (list.length && !list.includes("main")) setBranch(list[0]);
+    } catch {
+      setError("Couldn't reach the backend.");
+    }
   }, []);
+
+  useEffect(() => {
+    loadBranches();
+  }, [loadBranches]);
 
   // Wrapped in useCallback (not just an effect) so refreshToc() below can
   // re-run the exact same fetch on demand — needed after discardChange()
@@ -120,5 +135,6 @@ export function useNav() {
     addLocalPage,
     addLocalSection,
     refreshToc: loadToc,
+    refreshBranches: loadBranches,
   };
 }
