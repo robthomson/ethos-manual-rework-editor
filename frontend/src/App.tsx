@@ -37,6 +37,7 @@ import { EditablePageView } from "./components/EditablePageView";
 import { WorkspaceBar } from "./components/WorkspaceBar";
 import { NewPageModal } from "./components/NewPageModal";
 import { NewSectionModal } from "./components/NewSectionModal";
+import { SearchModal } from "./components/SearchModal";
 
 // The Changes list (WorkspaceBar.tsx) only ever gets a bare mdPath back
 // from scanChanges() — this resolves it to the same friendly title
@@ -99,6 +100,7 @@ export default function App() {
   const [selectedPage, setSelectedPage] = useState<{ mdPath: string; title: string } | null>(null);
   const [showNewPageModal, setShowNewPageModal] = useState(false);
   const [showNewSectionModal, setShowNewSectionModal] = useState(false);
+  const [showSearchModal, setShowSearchModal] = useState(false);
   // Bumped whenever a discard reverts the *currently open* page back to
   // its baseline — included in EditablePageView's own key below to force
   // a fresh mount (and re-fetch of the now-reverted content), since
@@ -341,6 +343,12 @@ export default function App() {
             onSubmit={submitWorkspace}
           />
 
+          <div className="search-bar-row">
+            <button className="new-item-button" onClick={() => setShowSearchModal(true)}>
+              🔍 Search
+            </button>
+          </div>
+
           {canAuthorNewPages && (
             <div className="new-page-row">
               <button className="new-item-button" onClick={() => setShowNewPageModal(true)}>
@@ -373,6 +381,15 @@ export default function App() {
 
         {showNewSectionModal && (
           <NewSectionModal onCreate={handleCreateNewSection} onClose={() => setShowNewSectionModal(false)} />
+        )}
+
+        {showSearchModal && (
+          <SearchModal
+            branch={branch}
+            locale={locale}
+            onNavigate={selectChangedPage}
+            onClose={() => setShowSearchModal(false)}
+          />
         )}
 
         <main className="app-main">
