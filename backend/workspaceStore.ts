@@ -54,18 +54,16 @@
  *   locale only ever translates pages the nav already lists, never
  *   invents its own. It writes the new page's own file (untracked
  *   baseline, so it shows as "added") AND a local working copy of
- *   mkdocs.yml with the new nav entry inserted, tracked the same way a
- *   page is — see that function's own comment for the YAML round-trip
- *   fidelity trade-off this makes.
+ *   docs/en/SUMMARY.md with one new line inserted, tracked the same way a
+ *   page is — see that function's own comment.
  */
 import fs from "fs-extra";
 import path from "path";
-import yaml from "js-yaml";
 import { isSafePathSegment, isSafeRelativePath } from "./safePath";
 import {
   fetchPageSource,
   tryFetchPageSource,
-  fetchRawMkdocsYaml,
+  fetchSummaryMarkdown,
   docsPath,
   latestCommitSha,
   RepoError,
@@ -231,50 +229,51 @@ export async function savePage(name: string, mdPath: string, content: string): P
   await fs.writeFile(workingPath, content, "utf8");
 }
 
-// mkdocs.yml itself — only ever touched by createNewPage() below, and
-// only ever within an English workspace (new pages are English-only;
-// every other locale only ever translates pages the nav already lists).
-// Same working-copy/.baseline shape as a regular page, just rooted at
-// the workspace itself rather than under docs/<locale>/.
-function mkdocsWorkingPath(root: string): string {
-  return path.join(root, "mkdocs.yml");
+// Nav lives at docs/en/SUMMARY.md now (the mkdocs-literate-nav plugin's
+// own nav source on the real repo, replacing mkdocs.yml's old YAML nav:
+// block) — only ever touched by createNewPage()/createNewSection() below,
+// and only ever within an English workspace (new pages/sections are
+// English-only; every other locale only ever translates pages the nav
+// already lists). Reuses the exact same working-copy/.baseline path
+// helpers a real page gets (workingCopyPath()/baselinePath() above),
+// since it genuinely is one: a real file at a real docs/<locale>/ path.
+function summaryWorkingPath(root: string): string {
+  return workingCopyPath(root, "en", "SUMMARY.md");
 }
 
-function mkdocsBaselinePath(root: string): string {
-  return path.join(root, ".baseline", "mkdocs.yml");
+function summaryBaselinePath(root: string): string {
+  return baselinePath(root, "en", "SUMMARY.md");
 }
 
-// Finds a top-level nav section by its label and returns its own
-// landing-page path (nav's own "first bare-string child is the
-// section's landing page" convention — see mkdocsConfig.ts:buildToc()'s
-// identical logic) — needed to derive what folder a new page under that
-// section belongs in. Returns null if no such section exists, or it has
-// no landing page of its own to derive a folder from.
-function findSectionLandingPath(nav: any[], sectionTitle: string): string | null {
-  for (const entry of nav) {
-    if (entry && typeof entry === "object" && !Array.isArray(entry)) {
-      for (const [label, value] of Object.entries(entry)) {
-        if (label === sectionTitle && Array.isArray(value) && typeof value[0] === "string") {
-          return value[0];
-        }
-      }
+// One line of docs/en/SUMMARY.md: "<indent>* [title](path)". Mirrors
+// mkdocsConfig.ts:buildToc()'s identical regex and ethos-manual-rework's
+// own scripts/_nav.py (_BULLET_RE) — three independent parsers of the
+// same file format (two languages, two repos, can't share one real
+// implementation), kept in sync by comment cross-reference.
+const SUMMARY_BULLET_RE = /^(\s*)[*-]\s+\[([^\]]+)\]\(([^)]+)\)\s*$/;
+
+// Finds a top-level section by title — its own link doubles as both its
+// title and its landing page (see mkdocsConfig.ts:buildToc()'s identical
+// convention) — and the line-index range of its indented children, which
+// createNewPage() below needs both to derive what folder a new page
+// belongs in and to know exactly where to splice a new line. Returns
+// null if no such section exists.
+function findSummarySection(
+  lines: string[],
+  sectionTitle: string,
+): { sectionIndex: number; landingPath: string; childrenEnd: number } | null {
+  for (let i = 0; i < lines.length; i++) {
+    const m = SUMMARY_BULLET_RE.exec(lines[i]);
+    if (!m || m[1].length !== 0 || m[2] !== sectionTitle) continue;
+    let end = i + 1;
+    // Advance past this section's own indented children (and any blank/
+    // comment lines among them) until the next top-level bullet or EOF.
+    while (end < lines.length) {
+      const next = SUMMARY_BULLET_RE.exec(lines[end]);
+      if (next && next[1].length === 0) break;
+      end++;
     }
-  }
-  return null;
-}
-
-// Same lookup, but returns the actual children array (mutated in place
-// by createNewPage() to append the new page entry) rather than just the
-// landing path.
-function findSectionChildren(nav: any[], sectionTitle: string): any[] | null {
-  for (const entry of nav) {
-    if (entry && typeof entry === "object" && !Array.isArray(entry)) {
-      for (const [label, value] of Object.entries(entry)) {
-        if (label === sectionTitle && Array.isArray(value)) {
-          return value;
-        }
-      }
-    }
+    return { sectionIndex: i, landingPath: m[3], childrenEnd: end };
   }
   return null;
 }
@@ -346,52 +345,52 @@ export interface NewPageResult {
 }
 
 // Shared by createNewPage() and createNewSection() below — both need to
-// read mkdocs.yml's current *working* state (a prior new-page/new-section
-// call this session, if any) or else fetch+baseline it fresh from GitHub
-// exactly once, then hand back the parsed config ready to mutate.
-async function loadWorkingMkdocsConfig(
+// read docs/en/SUMMARY.md's current *working* state (a prior new-page/
+// new-section call this session, if any) or else fetch+baseline it fresh
+// from GitHub exactly once, split into lines ready to splice.
+async function loadWorkingSummaryLines(
   token: GitHubToken | null,
   root: string,
   branch: string,
-): Promise<{ config: Record<string, any>; nav: any[] }> {
-  const mkdocsWorking = mkdocsWorkingPath(root);
-  const mkdocsBaseline = mkdocsBaselinePath(root);
+): Promise<string[]> {
+  const working = summaryWorkingPath(root);
+  const baseline = summaryBaselinePath(root);
 
-  let rawYaml: string;
-  if (await fs.pathExists(mkdocsWorking)) {
-    rawYaml = await fs.readFile(mkdocsWorking, "utf8");
+  let text: string;
+  if (await fs.pathExists(working)) {
+    text = await fs.readFile(working, "utf8");
   } else {
     try {
-      rawYaml = await fetchRawMkdocsYaml(token, branch);
+      text = await fetchSummaryMarkdown(token, branch);
     } catch (err) {
       if (err instanceof RepoError) throw new WorkspaceError(err.message);
       throw err;
     }
-    await fs.ensureDir(path.dirname(mkdocsBaseline));
-    await fs.writeFile(mkdocsBaseline, rawYaml, "utf8");
+    await fs.ensureDir(path.dirname(baseline));
+    await fs.writeFile(baseline, text, "utf8");
   }
 
-  const config = (yaml.load(rawYaml) as Record<string, any>) || {};
-  const nav: any[] = Array.isArray(config.nav) ? config.nav : [];
-  return { config, nav };
+  return text.split("\n");
 }
 
-// Re-dumping the whole parsed YAML config (rather than a targeted text
-// insertion) means the committed mkdocs.yml will come out fully
-// reformatted — correct content, but a much noisier diff than "one line
-// added". A known, deliberate scope cut for now; revisit with a
-// line-based insertion if that turns out to matter in practice.
-async function saveWorkingMkdocsConfig(root: string, config: Record<string, any>): Promise<void> {
-  const mkdocsWorking = mkdocsWorkingPath(root);
-  const newYaml = yaml.dump(config, { flowLevel: -1, sortKeys: false, lineWidth: -1 });
-  await fs.ensureDir(path.dirname(mkdocsWorking));
-  await fs.writeFile(mkdocsWorking, newYaml, "utf8");
+// Writes the (possibly spliced) lines back — a genuine line-level change,
+// not a full parse/re-dump, so the real diff a translator sees
+// (ReviewChangesModal.tsx) is just the one line added or removed, not the
+// whole file reformatted. This was the actual reason nav moved to
+// SUMMARY.md in the first place — the old mkdocs.yml YAML round-trip this
+// replaced always re-dumped the entire config for one nav entry (see this
+// file's own git history) — worth preserving deliberately, not an
+// incidental win to lose again with a parse-tree-then-rerender approach.
+async function saveWorkingSummaryLines(root: string, lines: string[]): Promise<void> {
+  const working = summaryWorkingPath(root);
+  await fs.ensureDir(path.dirname(working));
+  await fs.writeFile(working, lines.join("\n"), "utf8");
 }
 
 // English-only (enforced here, not just at the route layer, so this
 // can never be reached any other way even if a future caller forgets
-// the check) — writes the new page's own file AND inserts its nav
-// entry into a local working copy of mkdocs.yml, both tracked by
+// the check) — writes the new page's own file AND inserts one new line
+// into a local working copy of docs/en/SUMMARY.md, both tracked by
 // scanChanges() below ready for a future commit/PR.
 export async function createNewPage(
   token: GitHubToken | null,
@@ -414,33 +413,26 @@ export async function createNewPage(
   }
 
   const root = workspaceRoot(name);
-  const { config, nav } = await loadWorkingMkdocsConfig(token, root, meta.branch);
+  const lines = await loadWorkingSummaryLines(token, root, meta.branch);
 
-  const landingPath = findSectionLandingPath(nav, sectionTitle);
-  if (landingPath === null) {
+  const section = findSummarySection(lines, sectionTitle);
+  if (!section) {
     throw new WorkspaceError(`Couldn't find a section named "${sectionTitle}" with its own landing page.`);
   }
-  const folder = landingPath.includes("/") ? landingPath.slice(0, landingPath.lastIndexOf("/")) : "";
+  const folder = section.landingPath.includes("/")
+    ? section.landingPath.slice(0, section.landingPath.lastIndexOf("/"))
+    : "";
   const mdPath = folder ? `${folder}/${slug}.md` : `${slug}.md`;
 
-  const children = findSectionChildren(nav, sectionTitle);
-  if (!children) {
-    // Can't actually happen (findSectionLandingPath already confirmed
-    // this section exists with a list value) — narrows the type for
-    // the push() below rather than asserting past a real code path.
-    throw new WorkspaceError(`Couldn't find section "${sectionTitle}" to add the new page to.`);
-  }
-
-  const alreadyExists = children.some(
-    (c) => c && typeof c === "object" && !Array.isArray(c) && Object.values(c).includes(mdPath),
-  );
+  const alreadyExists = lines
+    .slice(section.sectionIndex, section.childrenEnd)
+    .some((line) => line.includes(`(${mdPath})`));
   if (alreadyExists) {
     throw new WorkspaceError(`A page at "${mdPath}" already exists in "${sectionTitle}".`);
   }
 
-  children.push({ [title]: mdPath });
-  config.nav = nav;
-  await saveWorkingMkdocsConfig(root, config);
+  lines.splice(section.childrenEnd, 0, `    * [${title}](${mdPath})`);
+  await saveWorkingSummaryLines(root, lines);
 
   const workingPagePath = workingCopyPath(root, "en", mdPath);
   await fs.ensureDir(path.dirname(workingPagePath));
@@ -458,10 +450,10 @@ export interface NewSectionResult {
 }
 
 // A "section" here means a new top-level nav category with its own
-// landing page — confirmed against the real mkdocs.yml (every existing
-// top-level entry is exactly this shape: a label, an index.md landing
-// page, then child pages; there's no deeper nesting in practice). Same
-// English-only restriction and working-copy-of-mkdocs.yml mechanics as
+// landing page — confirmed against the real docs/en/SUMMARY.md (every
+// existing top-level bullet is exactly this shape: a title+link, then
+// indented child bullets; there's no deeper nesting in practice). Same
+// English-only restriction and working-copy-of-SUMMARY.md mechanics as
 // createNewPage() above (see that function's own comments) — a section
 // is just a page-less nav entry until its own landing page is written.
 export async function createNewSection(
@@ -484,32 +476,31 @@ export async function createNewSection(
   }
 
   const root = workspaceRoot(name);
-  const { config, nav } = await loadWorkingMkdocsConfig(token, root, meta.branch);
+  const lines = await loadWorkingSummaryLines(token, root, meta.branch);
 
-  const titleCollision = nav.some(
-    (entry) => entry && typeof entry === "object" && !Array.isArray(entry) && title in entry,
-  );
+  const topLevel = lines
+    .map((line) => SUMMARY_BULLET_RE.exec(line))
+    .filter((m): m is RegExpExecArray => !!m && m[1].length === 0);
+
+  const titleCollision = topLevel.some((m) => m[2] === title);
   if (titleCollision) {
     throw new WorkspaceError(`A section named "${title}" already exists.`);
   }
   // The folder is what actually has to be unique on disk — two
   // differently-titled sections both slugified to "wiring" would
   // otherwise silently collide and overwrite each other's landing page.
-  const folderCollision = nav.some((entry) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
-    return Object.values(entry).some((value) => {
-      const rest = Array.isArray(value) ? value : [];
-      return typeof rest[0] === "string" && (rest[0] === `${slug}/index.md` || rest[0].startsWith(`${slug}/`));
-    });
-  });
+  const folderCollision = topLevel.some(
+    (m) => m[3] === `${slug}/index.md` || m[3].startsWith(`${slug}/`),
+  );
   if (folderCollision) {
     throw new WorkspaceError(`A section already uses the "${slug}/" folder — pick a different slug.`);
   }
 
   const mdPath = `${slug}/index.md`;
-  nav.push({ [title]: [mdPath] });
-  config.nav = nav;
-  await saveWorkingMkdocsConfig(root, config);
+  // Appended at end-of-file, matching the old YAML nav's own
+  // nav.push(...) behavior — a new section always lands last.
+  lines.push(`* [${title}](${mdPath})`);
+  await saveWorkingSummaryLines(root, lines);
 
   const workingPagePath = workingCopyPath(root, "en", mdPath);
   await fs.ensureDir(path.dirname(workingPagePath));
@@ -580,6 +571,20 @@ export async function scanChanges(name: string): Promise<ChangeEntry[]> {
       ]);
       if (working === baselineContent) continue; // opened, never actually edited
 
+      // SUMMARY.md (only ever written by createNewPage()/createNewSection()
+      // above, always in an English workspace) has no frontmatter-sidecar
+      // concept at all — it's a nav file, not a translated page — so the
+      // usual sidecar-existence check below would always read as "added"
+      // even though it always genuinely exists upstream already (it's a
+      // required file, never something legitimately new). Short-circuited
+      // here rather than folded into the sidecar check itself, which is
+      // real per-page translation-provenance logic this file doesn't
+      // apply to at all.
+      if (relPath === "SUMMARY.md") {
+        changes.push({ path: relPath, type: "modified" });
+        continue;
+      }
+
       const hadUpstreamTranslation = await fs.pathExists(
         frontmatterSidecarPath(root, meta.locale, relPath),
       );
@@ -587,26 +592,12 @@ export async function scanChanges(name: string): Promise<ChangeEntry[]> {
     }
   }
 
+  // SUMMARY.md itself is walked here too, as an ordinary file under
+  // docs/en/ — no separate pass needed the way mkdocs.yml (a repo-root
+  // file, outside this walk entirely) used to require; see the
+  // relPath === "SUMMARY.md" special case above for its one real
+  // difference from a translated page (always "modified", never "added").
   await walk(docsRoot, "");
-
-  // mkdocs.yml — only ever touched by createNewPage() above. Unlike a
-  // page there's no "added" case for it (it always exists upstream
-  // already); "modified" is the only possible outcome once it's been
-  // locally edited at all, so a missing .baseline/ here (which
-  // shouldn't happen — createNewPage() always writes one before ever
-  // touching the working copy) is treated the same way, rather than
-  // silently skipping a real change over an unexpected missing file.
-  const mkdocsWorking = mkdocsWorkingPath(root);
-  if (await fs.pathExists(mkdocsWorking)) {
-    const mkdocsBaseline = mkdocsBaselinePath(root);
-    const working = await fs.readFile(mkdocsWorking, "utf8");
-    const baselineContent = (await fs.pathExists(mkdocsBaseline))
-      ? await fs.readFile(mkdocsBaseline, "utf8")
-      : null;
-    if (baselineContent === null || working !== baselineContent) {
-      changes.push({ path: "mkdocs.yml", type: "modified" });
-    }
-  }
 
   return changes;
 }
@@ -644,14 +635,9 @@ export async function getChangeDiffs(name: string): Promise<ChangeDiff[]> {
       continue;
     }
 
-    if (change.path === "mkdocs.yml") {
-      const working = await fs.readFile(mkdocsWorkingPath(root), "utf8");
-      const baselineFile = mkdocsBaselinePath(root);
-      const baseline = (await fs.pathExists(baselineFile)) ? await fs.readFile(baselineFile, "utf8") : null;
-      diffs.push({ path: change.path, type: change.type, isImage: false, baseline, working });
-      continue;
-    }
-
+    // SUMMARY.md included here too, as an ordinary path under docsRoot —
+    // no special case needed the way mkdocs.yml (a repo-root file) used
+    // to require.
     const working = await fs.readFile(path.join(docsRoot, change.path), "utf8");
     const baselineFile = baselinePath(root, meta.locale, change.path);
     const baseline = (await fs.pathExists(baselineFile)) ? await fs.readFile(baselineFile, "utf8") : null;
@@ -661,52 +647,48 @@ export async function getChangeDiffs(name: string): Promise<ChangeDiff[]> {
   return diffs;
 }
 
-// Removes mdPath's own nav entry from the workspace's local mkdocs.yml —
-// the reverse of createNewPage()/createNewSection()'s own insertion.
+// Removes mdPath's own line from the workspace's local docs/en/SUMMARY.md
+// — the reverse of createNewPage()/createNewSection()'s own insertion.
 // Only ever called for a path that genuinely has no baseline (a page or
 // section created this session, never existed upstream at all) — see
 // discardChange() below. Handles both shapes a nav entry can be: a plain
-// child page inside some section's children, or a section's own landing
-// page (in which case the whole section — including any child entries
-// under it — is removed, not just the landing page by itself; a section
-// with pages already added under it is a known, deliberate scope cut,
-// same spirit as this file's other YAML-round-trip trade-offs — those
-// child pages' own working files aren't touched, so discarding the
-// section separately from discarding each child it contains can leave
-// their files on disk with no nav entry pointing at them any more).
+// child page line inside some section, or a section's own top-level line
+// (in which case the whole section — its own line plus every indented
+// line under it — is removed, not just the one line; a section with
+// pages already added under it is a known, deliberate scope cut, same
+// spirit as this file's other trade-offs — those child pages' own
+// working files aren't touched, so discarding the section separately
+// from discarding each child it contains can leave their files on disk
+// with no nav entry pointing at them any more).
 async function removeNavEntry(root: string, mdPath: string): Promise<void> {
-  const mkdocsWorking = mkdocsWorkingPath(root);
-  if (!(await fs.pathExists(mkdocsWorking))) return; // nothing to clean up
+  const working = summaryWorkingPath(root);
+  if (!(await fs.pathExists(working))) return; // nothing to clean up
 
-  const rawYaml = await fs.readFile(mkdocsWorking, "utf8");
-  const config = (yaml.load(rawYaml) as Record<string, any>) || {};
-  const nav: any[] = Array.isArray(config.nav) ? config.nav : [];
+  const lines = (await fs.readFile(working, "utf8")).split("\n");
 
-  const sectionIdx = nav.findIndex((entry) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
-    return Object.values(entry).some((value) => Array.isArray(value) && value[0] === mdPath);
+  const sectionIdx = lines.findIndex((line) => {
+    const m = SUMMARY_BULLET_RE.exec(line);
+    return !!m && m[1].length === 0 && m[3] === mdPath;
   });
   if (sectionIdx !== -1) {
-    nav.splice(sectionIdx, 1);
-    config.nav = nav;
-    await saveWorkingMkdocsConfig(root, config);
+    let end = sectionIdx + 1;
+    while (end < lines.length) {
+      const next = SUMMARY_BULLET_RE.exec(lines[end]);
+      if (next && next[1].length === 0) break;
+      end++;
+    }
+    lines.splice(sectionIdx, end - sectionIdx);
+    await saveWorkingSummaryLines(root, lines);
     return;
   }
 
-  for (const entry of nav) {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
-    for (const value of Object.values(entry)) {
-      if (!Array.isArray(value)) continue;
-      const childIdx = value.findIndex(
-        (c) => c && typeof c === "object" && !Array.isArray(c) && Object.values(c).includes(mdPath),
-      );
-      if (childIdx !== -1) {
-        value.splice(childIdx, 1);
-        config.nav = nav;
-        await saveWorkingMkdocsConfig(root, config);
-        return;
-      }
-    }
+  const childIdx = lines.findIndex((line) => {
+    const m = SUMMARY_BULLET_RE.exec(line);
+    return !!m && m[1].length > 0 && m[3] === mdPath;
+  });
+  if (childIdx !== -1) {
+    lines.splice(childIdx, 1);
+    await saveWorkingSummaryLines(root, lines);
   }
 }
 
@@ -739,14 +721,15 @@ export interface DiscardResult {
 }
 
 export async function discardChange(name: string, mdPath: string): Promise<DiscardResult> {
-  if (mdPath === "mkdocs.yml") {
-    // Not a page — this shows up as its own "modified" entry only as a
-    // side effect of one or more new page/section creations, each
+  if (mdPath === "SUMMARY.md") {
+    // Not really a page — it shows up as its own "modified" entry only as
+    // a side effect of one or more new page/section creations, each
     // independently discardable via case 3 above. Discarding it directly
     // would revert *every* pending new-page/section's nav entry at once
     // while leaving their own working files behind, orphaned — safer to
-    // just not support this as its own target.
-    throw new WorkspaceError('Discard the new page/section itself, not "mkdocs.yml" directly.');
+    // just not support this as its own target (same reasoning as the old
+    // mkdocs.yml special case this replaced).
+    throw new WorkspaceError('Discard the new page/section itself, not "SUMMARY.md" directly.');
   }
   if (!isSafeRelativePath(mdPath)) throw new WorkspaceError(`Invalid path "${mdPath}".`);
 
@@ -785,12 +768,10 @@ export interface PreparedChange {
 // only has to deal with GitHub's API, never this project's own workspace
 // layout or frontmatter convention.
 //
-// Three cases:
-//   1. "mkdocs.yml" — repo-root file, committed as-is (no frontmatter
-//      concept, it's YAML not a translated page).
-//   2. An image — read as a raw Buffer (see gitRoutes.ts's own comment on
+// Two cases:
+//   1. An image — read as a raw Buffer (see gitRoutes.ts's own comment on
 //      why a binary file needs a real blob, not inline UTF-8 content).
-//   3. A .md page — the working copy never carries frontmatter at all
+//   2. A .md page — the working copy never carries frontmatter at all
 //      (stripped at materialize time, see this file's header comment).
 //      An English page is committed as-is; a translation gets
 //      `translated_from:` re-attached, bumped to the English page's
@@ -799,6 +780,10 @@ export interface PreparedChange {
 //      reason hooks/i18n_status.py's staleness check exists at all. Any
 //      other frontmatter fields a real prior translation already carried
 //      (from its own `.frontmatter/` sidecar) are preserved alongside it.
+//      SUMMARY.md (nav) falls into this same case, not a special one —
+//      it's a plain English .md file at a real docs/en/ path like any
+//      other, just one this app never attaches translated_from: to since
+//      meta.locale === "en" is guaranteed whenever changePath is it.
 export async function prepareChangeForCommit(
   token: GitHubToken | null,
   name: string,
@@ -806,11 +791,6 @@ export async function prepareChangeForCommit(
 ): Promise<PreparedChange> {
   const meta = await readMeta(name);
   const root = workspaceRoot(name);
-
-  if (changePath === "mkdocs.yml") {
-    const content = await fs.readFile(mkdocsWorkingPath(root), "utf8");
-    return { repoPath: "mkdocs.yml", binary: false, content };
-  }
 
   if (IMAGE_EXTENSIONS.test(changePath)) {
     const buffer = await fs.readFile(path.join(root, docsPath(meta.locale, changePath)));

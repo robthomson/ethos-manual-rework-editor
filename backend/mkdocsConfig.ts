@@ -15,12 +15,17 @@
  *   GitHub rate limit from 60/hour to 5000/hour, same reasoning as the
  *   Python original), it's just never required.
  *
- *   buildToc() walks mkdocs.yml's `nav:` the same way
- *   ethos-manual-rework's own scripts/build_pdfs.py:nav_pages() does,
- *   fed a copy of mkdocs.yml fetched over the API instead of read from a
- *   local checkout — but keeps the tree shape (that script flattens to
- *   a list since it only needs render order for the PDF; a picker needs
- *   the section/child structure back).
+ *   buildToc() parses docs/en/SUMMARY.md (the mkdocs-literate-nav
+ *   plugin's own nav source, which replaced mkdocs.yml's YAML `nav:`
+ *   block on the real repo) the same way ethos-manual-rework's own
+ *   scripts/_nav.py:nav_sections() does, fed a copy fetched over the API
+ *   instead of read from a local checkout — but keeps the tree shape
+ *   (that script flattens to a list since it only needs render order for
+ *   the PDF; a picker needs the section/child structure back). Per-locale
+ *   nav *titles* are unaffected by any of this — those still come from
+ *   mkdocs.yml's plugins.i18n.languages[].nav_translations:, which this
+ *   app has never read (the sidebar shows English titles regardless of
+ *   locale, same as before this file's nav source changed).
  *
  *   fetchRepoTree() (new here — the Python app has no equivalent) does
  *   one recursive git-tree listing per branch rather than checking each
@@ -157,6 +162,16 @@ export async function fetchRawMkdocsYaml(token: GitHubToken | null, branch: stri
   return text as string;
 }
 
+// Nav structure lives here now (the mkdocs-literate-nav plugin's own nav
+// source — see mkdocs.yml's plugins: list on the real repo) instead of
+// mkdocs.yml's own nav: block. Mirrors fetchRawMkdocsYaml() above exactly
+// — workspaceStore.ts's new-page flow needs this same raw text to insert
+// a line into, not just buildToc()'s already-parsed tree.
+export async function fetchSummaryMarkdown(token: GitHubToken | null, branch: string): Promise<string> {
+  const text = await fetchTextFile(token, branch, "docs/en/SUMMARY.md", false);
+  return text as string;
+}
+
 export async function fetchMkdocsConfig(
   token: GitHubToken | null,
   branch: string,
@@ -201,38 +216,48 @@ export interface TocPage {
   children: TocPage[];
 }
 
-// Walks nav:. A section (dict value is a list) whose first child is a
-// bare, unlabeled string is treated as that section's own landing page
-// — matches both mkdocs' own interpretation (clicking a nav tab opens
-// it) and how every section in this repo's nav is actually written.
-export function buildToc(config: Record<string, any>): TocPage[] {
-  function walk(entries: any[]): TocPage[] {
-    const pages: TocPage[] = [];
-    for (const entry of entries || []) {
-      if (typeof entry === "string") {
-        pages.push({ title: entry, mdPath: entry, children: [] });
-        continue;
-      }
-      if (entry && typeof entry === "object") {
-        for (const [label, value] of Object.entries(entry)) {
-          if (typeof value === "string") {
-            pages.push({ title: label, mdPath: value, children: [] });
-            continue;
-          }
-          let sectionPath: string | null = null;
-          let rest = Array.isArray(value) ? value : [];
-          if (rest.length > 0 && typeof rest[0] === "string") {
-            sectionPath = rest[0];
-            rest = rest.slice(1);
-          }
-          pages.push({ title: label, mdPath: sectionPath, children: walk(rest) });
-        }
-      }
-    }
-    return pages;
-  }
+// One literate-nav bullet: leading whitespace (indent — always a multiple
+// of 4 spaces in this repo's SUMMARY.md), a "*"/"-" marker, then a
+// markdown link. Mirrors ethos-manual-rework's own scripts/_nav.py
+// (_BULLET_RE) exactly — both parse the same file, so both need to agree
+// on its grammar. Non-matching lines (blank lines, the file's own leading
+// HTML-comment docstring) are simply skipped, not errors — SUMMARY.md is
+// free-form markdown around the bullet list, not a strict grammar.
+const BULLET_RE = /^(\s*)[*-]\s+\[([^\]]+)\]\(([^)]+)\)\s*$/;
 
-  return walk(config.nav || []);
+// Parses docs/en/SUMMARY.md into the same tree shape buildToc() always
+// returned — this repo's SUMMARY.md never nests deeper than one level
+// (matching the old YAML nav's own shape, which had no recursion either):
+// a top-level bullet is a section (or a plain page, if it has no indented
+// children under it — e.g. "Home"), and every indented bullet is a leaf
+// child of whichever section was most recently started. A section's own
+// link doubles as both its title and its landing page — literate-nav's
+// format actually maps more directly onto {title, mdPath, children} than
+// the old YAML nav's "first bare child is the landing page" special case
+// did, since every node here always has both a title and a path.
+export function buildToc(summaryMarkdown: string): TocPage[] {
+  const pages: TocPage[] = [];
+  for (const line of summaryMarkdown.split("\n")) {
+    const match = BULLET_RE.exec(line);
+    if (!match) continue;
+    const [, indent, title, mdPath] = match;
+    if (indent.length === 0) {
+      pages.push({ title, mdPath, children: [] });
+    } else if (pages.length > 0) {
+      pages[pages.length - 1].children.push({ title, mdPath, children: [] });
+    }
+  }
+  return pages;
+}
+
+// Fetches + parses in one cached step, mirroring fetchMkdocsConfig()'s own
+// shape — every caller that used to do buildToc(await fetchMkdocsConfig(...))
+// now does await fetchToc(...) instead.
+export async function fetchToc(token: GitHubToken | null, branch: string): Promise<TocPage[]> {
+  return cached(`toc:${branch}`, STRUCTURE_TTL_MS, async () => {
+    const text = await fetchSummaryMarkdown(token, branch);
+    return buildToc(text);
+  });
 }
 
 // One recursive tree listing (not one call per nav page) so annotating
