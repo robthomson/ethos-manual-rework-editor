@@ -72,6 +72,7 @@ import { visit } from "unist-util-visit";
 import { preprocessPymdownxBlocks, remarkPymdownxBlocks } from "./pymdownxBlocks";
 import { remarkStripAttrList } from "./attrList";
 import { fetchImageResolutionContext, resolveImageSrc, type ImageResolutionContext } from "./imageResolver";
+import { classifyMarkdownLink } from "./linkResolver";
 
 function rehypeRewriteImages(ctx: ImageResolutionContext) {
   return () => (tree: any) => {
@@ -140,6 +141,15 @@ interface MarkdownPreviewProps {
   // entirely for read-only browsing (PageView.tsx), where there's no
   // workspace to check against.
   workspace?: string;
+  // Called instead of following a link when it's an internal
+  // cross-reference to another page in this repo (see
+  // linkResolver.ts:classifyMarkdownLink) — every caller passes
+  // App.tsx's own page-selection setter (the same one the nav tree and
+  // the Changes list already use), so clicking an in-content link
+  // navigates within the app exactly like clicking that page in the nav
+  // would. Optional only so a caller that genuinely has nowhere to
+  // navigate to could omit it — every real caller today provides it.
+  onNavigate?: (mdPath: string) => void;
 }
 
 // Debounced to a short pause in typing rather than every keystroke —
@@ -148,9 +158,28 @@ interface MarkdownPreviewProps {
 // shorter than that file's 3000ms without janking the UI.
 const RENDER_DEBOUNCE_MS = 300;
 
-export function MarkdownPreview({ content, branch, locale, mdPath, workspace }: MarkdownPreviewProps) {
+export function MarkdownPreview({ content, branch, locale, mdPath, workspace, onNavigate }: MarkdownPreviewProps) {
   const [node, setNode] = useState<React.ReactNode>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Single delegated handler rather than per-link ones — the rendered
+  // tree is plain React elements from rehype-react, not components of
+  // our own, so there's nowhere natural to attach a per-anchor onClick
+  // without a second pass over the tree. Only intercepts internal
+  // cross-references (see linkResolver.ts); a genuine external link
+  // (already marked target="_blank" by rehypeExternalLinks) is left
+  // alone entirely — default behavior + Electron's own
+  // setWindowOpenHandler already do the right thing for those.
+  function handleClick(e: React.MouseEvent<HTMLDivElement>) {
+    const anchor = (e.target as HTMLElement).closest("a");
+    if (!anchor) return;
+    const href = anchor.getAttribute("href");
+    if (!href) return;
+    const classification = classifyMarkdownLink(href, mdPath);
+    if (classification.kind !== "internal" || !onNavigate) return;
+    e.preventDefault();
+    onNavigate(classification.mdPath);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -180,5 +209,9 @@ export function MarkdownPreview({ content, branch, locale, mdPath, workspace }: 
     );
   }
 
-  return <div className="rendered-preview">{node}</div>;
+  return (
+    <div className="rendered-preview" onClick={handleClick}>
+      {node}
+    </div>
+  );
 }

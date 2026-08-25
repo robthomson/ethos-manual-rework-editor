@@ -30,6 +30,10 @@ interface PageViewProps {
   localeName: string;
   mdPath: string;
   title: string;
+  // See renderMarkdown.tsx's MarkdownPreviewProps.onNavigate — App.tsx's
+  // own page-selection setter, so an in-content link navigates within
+  // the app the same way clicking that page in the nav tree would.
+  onNavigate: (mdPath: string) => void;
 }
 
 type PaneMode = "source" | "preview";
@@ -47,7 +51,7 @@ function PaneModeToggle({ mode, onChange }: { mode: PaneMode; onChange: (m: Pane
   );
 }
 
-export function PageView({ branch, locale, localeName, mdPath, title }: PageViewProps) {
+export function PageView({ branch, locale, localeName, mdPath, title, onNavigate }: PageViewProps) {
   const [data, setData] = useState<PageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [englishMode, setEnglishMode] = useState<PaneMode>("source");
@@ -112,7 +116,13 @@ export function PageView({ branch, locale, localeName, mdPath, title }: PageView
             <textarea readOnly value={data.source} />
           ) : (
             <div className="preview-scroll">
-              <MarkdownPreview content={data.source} branch={branch} locale="en" mdPath={mdPath} />
+              <MarkdownPreview
+                content={data.source}
+                branch={branch}
+                locale="en"
+                mdPath={mdPath}
+                onNavigate={onNavigate}
+              />
             </div>
           )}
         </div>
@@ -127,7 +137,13 @@ export function PageView({ branch, locale, localeName, mdPath, title }: PageView
               <textarea readOnly value={translationContent} />
             ) : (
               <div className="preview-scroll">
-                <MarkdownPreview content={translationContent} branch={branch} locale={locale} mdPath={mdPath} />
+                <MarkdownPreview
+                  content={translationContent}
+                  branch={branch}
+                  locale={locale}
+                  mdPath={mdPath}
+                  onNavigate={onNavigate}
+                />
               </div>
             )}
           </div>
