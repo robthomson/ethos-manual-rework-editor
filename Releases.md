@@ -1,3 +1,17 @@
+## 0.2.4
+
+- Added search: find any page by its actual content, not just its
+  title, from a new Search button in the sidebar.
+- "Submit for review" now shows a real diff of every pending change
+  first, so you can see exactly what's about to be committed before it
+  opens (or updates) the pull request.
+- Fixed a bug where the sidebar could get stuck showing a GitHub
+  rate-limit error even while signed in, after a fresh app launch.
+- Clicking a link inside a page now opens external sites in your
+  browser (with a confirmation first) but keeps links to other pages
+  in this manual inside the app, instead of navigating the whole
+  window away.
+
 ## 0.2.3
 
 - Windows builds are now produced automatically by the same release
