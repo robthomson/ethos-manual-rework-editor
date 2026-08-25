@@ -155,10 +155,13 @@ export default function App() {
     return ok;
   }
 
-  // A change entry only ever knows its own bare mdPath (see
-  // findTitleByPath's own comment) — falls back to that path itself if
-  // the page genuinely isn't in the currently-loaded toc for some reason
-  // (e.g. a stale/renamed entry), rather than showing nothing at all.
+  // A change entry (or an in-content link resolved by
+  // linkResolver.ts:classifyMarkdownLink, threaded down through
+  // EditablePageView.tsx/PageView.tsx as onNavigate) only ever knows its
+  // own bare mdPath (see findTitleByPath's own comment) — falls back to
+  // that path itself if the page genuinely isn't in the currently-loaded
+  // toc for some reason (e.g. a stale/renamed entry, or a link to a page
+  // that doesn't exist), rather than showing nothing at all.
   function selectChangedPage(mdPath: string) {
     setSelectedPage({ mdPath, title: findTitleByPath(toc, mdPath) ?? mdPath });
   }
@@ -386,6 +389,7 @@ export default function App() {
                 hasChange={changes.some((c) => c.path === selectedPage.mdPath)}
                 onSaved={refreshChanges}
                 onDiscard={() => discardPageChange(selectedPage.mdPath)}
+                onNavigate={selectChangedPage}
               />
             ) : (
               <PageView
@@ -395,6 +399,7 @@ export default function App() {
                 localeName={locales[locale] || locale}
                 mdPath={selectedPage.mdPath}
                 title={selectedPage.title}
+                onNavigate={selectChangedPage}
               />
             )
           ) : (

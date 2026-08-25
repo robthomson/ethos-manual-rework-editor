@@ -70,8 +70,11 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { MarkdownPreview } from "../preview/renderMarkdown";
 import { AddImageModal } from "./AddImageModal";
+import { ExternalLinkModal } from "./ExternalLinkModal";
 import { relativeAssetPath } from "../utils/relativePath";
 import { containsPymdownxBlocks } from "../preview/pymdownxBlocks";
+import { classifyMarkdownLink } from "../preview/linkResolver";
+import { useExternalLinkGuard } from "../hooks/useExternalLinkGuard";
 import { WysiwygEditor, type WysiwygEditorHandle } from "../wysiwyg/WysiwygEditor";
 
 interface EditablePageData {
@@ -151,6 +154,11 @@ interface EditablePageViewProps {
   hasChange: boolean;
   onSaved: () => void;
   onDiscard: () => Promise<{ ok: boolean; error?: string }>;
+  // App.tsx's own page-selection setter — see renderMarkdown.tsx's
+  // MarkdownPreviewProps.onNavigate for the full reasoning; threaded
+  // down to both this page's Preview panes and to Rich mode's own
+  // click handling below.
+  onNavigate: (mdPath: string) => void;
 }
 
 export function EditablePageView({
@@ -163,6 +171,7 @@ export function EditablePageView({
   hasChange,
   onSaved,
   onDiscard,
+  onNavigate,
 }: EditablePageViewProps) {
   const [englishSource, setEnglishSource] = useState<string | null>(null);
   const [content, setContent] = useState("");
@@ -177,6 +186,7 @@ export function EditablePageView({
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkValue, setLinkValue] = useState("");
   const [discarding, setDiscarding] = useState(false);
+  const externalLinkGuard = useExternalLinkGuard();
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Guards against saving stale content from a page that's since been
@@ -302,6 +312,30 @@ export function EditablePageView({
     e.preventDefault();
   }
 
+  // Same reasoning and classification as MarkdownPreview's own click
+  // handler (renderMarkdown.tsx) — a plain <a href> clicked anywhere in
+  // this Electron app navigates the whole window away rather than
+  // opening a new tab (see WysiwygEditor.tsx's linkAttr comment). Rich
+  // mode's Milkdown-rendered links are real DOM anchors too, so the
+  // exact same delegated-click technique works here without needing to
+  // touch ProseMirror/Milkdown's own event handling at all — a normal
+  // 'click' event still bubbles up to this wrapping div regardless of
+  // what ProseMirror does internally with it.
+  function wysiwygClick(e: MouseEvent) {
+    const anchor = (e.target as HTMLElement).closest("a");
+    if (!anchor) return;
+    const href = anchor.getAttribute("href");
+    if (!href) return;
+    const classification = classifyMarkdownLink(href, mdPath);
+    if (classification.kind === "internal") {
+      e.preventDefault();
+      onNavigate(classification.mdPath);
+    } else if (classification.kind === "external") {
+      e.preventDefault();
+      externalLinkGuard.requestOpen(href);
+    }
+  }
+
   async function openImageModal() {
     insertCursorRef.current = textareaRef.current?.selectionStart ?? content.length;
     try {
@@ -376,7 +410,14 @@ export function EditablePageView({
             <textarea readOnly value={englishSource ?? ""} />
           ) : (
             <div className="preview-scroll">
-              <MarkdownPreview content={englishSource ?? ""} branch={branch} locale="en" mdPath={mdPath} />
+              <MarkdownPreview
+                content={englishSource ?? ""}
+                branch={branch}
+                locale="en"
+                mdPath={mdPath}
+                onNavigate={onNavigate}
+                onExternalLink={externalLinkGuard.requestOpen}
+              />
             </div>
           )}
         </div>
@@ -445,7 +486,7 @@ export function EditablePageView({
             </div>
           </div>
           {effectiveMode === "rich" ? (
-            <div className="wysiwyg-scroll">
+            <div className="wysiwyg-scroll" onClick={wysiwygClick}>
               <WysiwygEditor
                 ref={wysiwygRef}
                 content={content}
@@ -470,6 +511,8 @@ export function EditablePageView({
                 locale={locale}
                 mdPath={mdPath}
                 workspace={workspace}
+                onNavigate={onNavigate}
+                onExternalLink={externalLinkGuard.requestOpen}
               />
             </div>
           )}
@@ -482,6 +525,14 @@ export function EditablePageView({
           existingNames={existingImageNames}
           onClose={() => setShowImageModal(false)}
           onUploaded={handleImageUploaded}
+        />
+      )}
+
+      {externalLinkGuard.pendingUrl && (
+        <ExternalLinkModal
+          url={externalLinkGuard.pendingUrl}
+          onConfirm={externalLinkGuard.confirm}
+          onCancel={externalLinkGuard.cancel}
         />
       )}
     </div>
