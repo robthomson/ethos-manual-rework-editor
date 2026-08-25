@@ -21,7 +21,7 @@ import {
   listBranches,
   fetchMkdocsConfig,
   localeNames,
-  buildToc,
+  fetchToc,
   fetchRepoTree,
   docsPath,
   fetchPageSource,
@@ -100,7 +100,7 @@ router.get("/toc", async (req, res) => {
       return res.status(400).json({ error: `Unknown locale "${locale}" for branch ${branch}.` });
     }
 
-    const toc = buildToc(config);
+    const toc = await fetchToc(token, branch);
 
     // One tree listing regardless of locale — for "en" itself every page
     // in the nav trivially exists (it's the source of truth the nav was
@@ -264,7 +264,7 @@ router.get("/search", async (req, res) => {
       return res.status(400).json({ error: `Unknown locale "${locale}" for branch ${branch}.` });
     }
 
-    const pages = flattenPages(buildToc(config));
+    const pages = flattenPages(await fetchToc(token, branch));
 
     const index = await cached(`search-index:${branch}:${locale}`, PAGE_TTL_MS, () =>
       mapLimit<{ mdPath: string; title: string }, SearchIndexEntry>(pages, 8, async ({ mdPath, title }) => {
