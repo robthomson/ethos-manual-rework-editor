@@ -395,7 +395,20 @@ router.post("/device/poll", async (req, res) => {
 // authenticated?" anymore (that let anyone probe/impersonate any GitHub
 // username); it can only ask "who does my own session cookie belong to?".
 // ---------------------------------------------
-router.get("/session", async (req, res) => {
+// Shared by /session below and server.ts's own early auto-adopt
+// middleware — factored out so both go through the exact same
+// resolve-then-verify logic instead of two copies drifting apart. See
+// that middleware's own comment for why a second caller of this needed
+// to exist at all: /session was previously the *only* place this ran,
+// which meant whichever request(s) reached the backend before it — most
+// commonly navRoutes.ts's own branches/toc fetches, firing on mount
+// same as this app's own auth check — raced it and read
+// req.session.login while it was still empty, silently falling back to
+// an anonymous GitHub call (a real, live bug: confirmed reproducing a
+// stuck "rate limit hit" nav error despite actually being signed in,
+// fixed by moving the auto-adopt earlier so it no longer depends on
+// which request happens to run first).
+export async function resolveSessionLogin(req: express.Request): Promise<string | null> {
   let login = req.session.login;
 
   // No session yet for this cookie (fresh browser session, or the
@@ -421,9 +434,15 @@ router.get("/session", async (req, res) => {
     // Truly expired/revoked, no refresh path left — don't keep asserting
     // a session that no longer has a usable token behind it.
     req.session.login = undefined;
+    return null;
   }
 
-  res.json({ authenticated: !!token, login: token ? login : null });
+  return login as string;
+}
+
+router.get("/session", async (req, res) => {
+  const login = await resolveSessionLogin(req);
+  res.json({ authenticated: !!login, login });
 });
 
 // ---------------------------------------------

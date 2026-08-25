@@ -43,7 +43,7 @@ import rateLimit from "express-rate-limit";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
-import authRoutes from "./routes/authRoutes";
+import authRoutes, { resolveSessionLogin } from "./routes/authRoutes";
 import navRoutes from "./routes/navRoutes";
 import workspaceRoutes from "./routes/workspaceRoutes";
 import gitRoutes from "./routes/gitRoutes";
@@ -109,6 +109,28 @@ app.use(
     legacyHeaders: false,
   }),
 );
+
+// Resolves req.session.login (auto-adopting this install's sole stored
+// GitHub token when the cookie hasn't got one yet — see
+// authRoutes.ts:resolveSessionLogin's own comment) before any /api
+// route runs, not just /api/auth/session. Without this, whichever
+// request(s) happened to reach the backend first after a fresh
+// cookie/restart — most commonly navRoutes.ts's own branches/toc
+// fetches, which fire on mount at the same time useAuth.ts's own
+// session check does — raced it and read an empty session, silently
+// falling back to an anonymous GitHub call even though this install
+// genuinely has a signed-in user. Confirmed live: this produced a
+// stuck "GitHub API rate limit hit" nav error despite the topbar
+// correctly showing "Signed in as ...". Scoped to /api, same as the
+// rate limiter just above, rather than running on every static asset
+// request too. req.session.login already being set (every request
+// after the first) still costs one small local token-file read each
+// time (see getUsableToken()) — cheap enough for a single-user desktop
+// install not to bother caching further.
+app.use("/api", async (req, _res, next) => {
+  await resolveSessionLogin(req);
+  next();
+});
 
 // Mount GitHub OAuth
 app.use("/api/auth", authRoutes);

@@ -27,7 +27,7 @@
  *   instead, which isEditing below reflects directly.
  */
 import "./App.css";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "./hooks/useAuth";
 import { useNav, type NavPage } from "./hooks/useNav";
 import { useWorkspace } from "./hooks/useWorkspace";
@@ -80,6 +80,7 @@ export default function App() {
     addLocalPage,
     addLocalSection,
     refreshToc,
+    refreshBranches,
   } = useNav();
 
   const {
@@ -117,6 +118,26 @@ export default function App() {
     if (!workspacesLoaded || !branch || !locale) return;
     ensureDefaultWorkspace(branch, locale);
   }, [branch, locale, workspacesLoaded, ensureDefaultWorkspace]);
+
+  // useNav.ts's own branches/toc fetches only ever run once (on mount,
+  // or when branch/locale change) — nothing about them was watching
+  // auth state, so a call that failed while still signed out (most
+  // commonly GitHub's own anonymous rate limit, easy to exhaust on a
+  // repo this size) had no way to ever retry, even long after signing
+  // in unlocked a much higher quota that would succeed. Confirmed live:
+  // the sidebar got stuck showing a stale rate-limit error after
+  // signing in, until this was added. isAuthenticatedRef skips the very
+  // first render (already false there — nothing to retry yet) and only
+  // re-fetches on a genuine false→true transition, not on every
+  // unrelated render.
+  const wasAuthenticatedRef = useRef(isAuthenticated);
+  useEffect(() => {
+    if (isAuthenticated && !wasAuthenticatedRef.current) {
+      refreshBranches();
+      refreshToc();
+    }
+    wasAuthenticatedRef.current = isAuthenticated;
+  }, [isAuthenticated, refreshBranches, refreshToc]);
 
   function changeBranch(next: string) {
     setBranch(next);
