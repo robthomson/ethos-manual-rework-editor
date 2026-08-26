@@ -21,6 +21,7 @@ import {
   listBranches,
   fetchMkdocsConfig,
   localeNames,
+  realContentLocaleNames,
   fetchToc,
   fetchRepoTree,
   docsPath,
@@ -94,11 +95,19 @@ router.get("/toc", async (req, res) => {
   try {
     const token = await tokenForRequest(req);
     const config = await fetchMkdocsConfig(token, branch);
-    const locales = localeNames(config);
 
-    if (!(locale in locales)) {
+    // Validated against the full locale set (any locale actually
+    // configured in mkdocs.yml is loadable), but the picker itself only
+    // gets the real-content subset -- see realContentLocaleNames()'s own
+    // comment. The currently-selected locale is always included even if
+    // it falls outside that subset (e.g. loaded via a saved workspace
+    // predating this filter, or a direct link), so switching *away* from
+    // it stays possible without it vanishing from the list first.
+    if (!(locale in localeNames(config))) {
       return res.status(400).json({ error: `Unknown locale "${locale}" for branch ${branch}.` });
     }
+    const locales = realContentLocaleNames(config);
+    if (!(locale in locales)) locales[locale] = localeNames(config)[locale];
 
     const toc = await fetchToc(token, branch);
 
