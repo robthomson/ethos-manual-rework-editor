@@ -194,6 +194,15 @@ export async function fetchMkdocsConfig(
 // under plugins.i18n.languages in mkdocs.yml (it's the implicit
 // default), so it's added here to match — same as
 // ethos-manual-rework/scripts/build_pdfs.py:locale_names().
+//
+// Deliberately unfiltered — every locale actually configured in
+// plugins.i18n.languages, whether or not it has real .odt-sourced
+// content yet (see real_content_locale_names() below for the filtered
+// view). Used wherever a locale just needs to be a *valid* one for the
+// branch (workspace creation, page load) — narrowing this to only
+// "real content" locales would block legitimate work that already
+// exists in an as-yet-unsynced locale (e.g. French's own hand-
+// translated pilot content), not just declutter a picker.
 export function localeNames(config: Record<string, any>): Record<string, string> {
   const names: Record<string, string> = { en: "English" };
   const plugins = Array.isArray(config.plugins) ? config.plugins : [];
@@ -208,6 +217,24 @@ export function localeNames(config: Record<string, any>): Record<string, string>
     }
   }
   return names;
+}
+
+// Subset of localeNames() to actually surface in the Language picker --
+// mkdocs.yml's extra.real_content_locales (see that key's own comment)
+// when the repo declares it, otherwise every locale (unfiltered,
+// matching the picker's pre-existing behavior for a repo that hasn't
+// adopted this yet). Never used for validation -- see localeNames().
+export function realContentLocaleNames(config: Record<string, any>): Record<string, string> {
+  const names = localeNames(config);
+  const realContentLocales = config.extra?.real_content_locales;
+  if (!Array.isArray(realContentLocales) || !realContentLocales.length) return names;
+
+  const allowed = new Set(realContentLocales);
+  const filtered: Record<string, string> = {};
+  for (const [code, name] of Object.entries(names)) {
+    if (allowed.has(code)) filtered[code] = name;
+  }
+  return filtered;
 }
 
 export interface TocPage {
